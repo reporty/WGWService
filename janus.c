@@ -4518,7 +4518,7 @@ gint main(int argc, char *argv[])
     if (item && item->value) {
 		shc_auth_secret = item->value;
 	}
-    janus_sanityhealthcheck_auth_init(shc_auth_secret);
+    carbyne_janus_sanityhealthcheck_auth_init(shc_auth_secret);
 	/********************************************************************************************** 
 	 ************************ Carbyne - END SECTION - SanityHealthCheck ***************************
 	 **********************************************************************************************/
