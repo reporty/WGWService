@@ -47,8 +47,12 @@ general: {
 									# without this, the Admin API MUST
 									# be enabled, as tokens are added and removed
 									# through messages sent there.
-        #Carbune Sanity Health check key
-        sanity_hc_auth_secret
+
+        sanity_hc_auth_secret						
+									# Carbyne Sanity Health Check secret key.
+									# This variable will be replaced 
+									# during setup with the same name
+									# including the secret for each env accordingly.
 
 
 	admin_secret = "janusoverlord"	# String that all Janus requests must contain
