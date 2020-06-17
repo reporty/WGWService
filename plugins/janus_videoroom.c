@@ -7771,7 +7771,6 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail, Token should have exactly one data and middle and  one hash part \n");
         goto fail;
     }
-   /* Room token FORMULA: Base64(timestamp):nonce:Base64(HMACSHA256(room_id:Base64(timestamp):nonce)); */
    /* Token FORMULA:
         Base64UrlSafe(timestamp):Base64UrlSafe(nonce):Base64UrlSafe(HMACSHA256(id:Base64UrlSafe(timestamp):Base64UrlSafe(nonce)));  */
    /* Verify timestamp */
