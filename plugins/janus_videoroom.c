@@ -5542,9 +5542,10 @@ void janus_videoroom_hangup_media(janus_plugin_session *handle) {
                  JANUS_LOG(LOG_WARN, "VideoRoom session already marked as destroyed...\n");
                 return;
         }
-
+if(session->participant_type == janus_videoroom_p_type_publisher)  {
         janus_videoroom_publisher *publisher = (janus_videoroom_publisher *)session->participant;
         participant_type = session->participant_type;
+        JANUS_LOG(LOG_ERR, "[%s-%p] session->participant_type: %d \n", JANUS_VIDEOROOM_PACKAGE, handle,participant_type); //PVL
 	if(publisher && publisher->room) {
 		room_id = publisher->room_id;
 		room_id_str = publisher->room_id_str ? g_strdup(publisher->room_id_str): NULL;
@@ -5586,6 +5587,7 @@ void janus_videoroom_hangup_media(janus_plugin_session *handle) {
 		room_id_str = session->room_id_str ? g_strdup(session->room_id_str): NULL;
 		participant_type = session->participant_type;
 	}
+}
 	janus_mutex_unlock(&sessions_mutex);
 	/*CARBYNE-LOGIC end patch */
 	if(participant_type == janus_videoroom_p_type_publisher || participant_type == janus_videoroom_p_type_none ) {
