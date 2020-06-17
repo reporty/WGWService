@@ -1329,7 +1329,6 @@ static gboolean string_ids = FALSE;
 static janus_callbacks *gateway = NULL;
 static GThread *handler_thread;
 static char *auth_secret = NULL;      /*CARBYNE-AUT*/
-static uint32_t token_ttl_ms = 0;     /*CARBYNE-AUT*/
 static char *rtsp_url = NULL;         /*CARBYNE-RF*/
 static gboolean auth_enabled = FALSE; /*CARBYNE-AUT*/
 static gboolean janus_auth_check_signature(const char *token, const char *room) ;/*CARBYNE-AUT*/
@@ -2072,12 +2071,6 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
                     JANUS_LOG(LOG_VERB, "auth_secret: %s\n", auth_secret);
                 }
 
-                janus_config_item *token_ttl_ms_item = janus_config_get(config, config_general, janus_config_type_item, "token_ttl_ms");
-
-                if(token_ttl_ms_item != NULL && token_ttl_ms_item->value != NULL) {
-                        token_ttl_ms  = atol(token_ttl_ms_item->value);
-		}
-                JANUS_LOG(LOG_VERB, "token_ttl_ms: %uld\n", token_ttl_ms);
                 /*CARBYNE-AUT end*/
 		/* Any admin key to limit who can "create"? */
 		janus_config_item *key = janus_config_get(config, config_general, janus_config_type_item, "admin_key");
@@ -7779,6 +7772,8 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
         goto fail;
     }
    /* Room token FORMULA: Base64(timestamp):nonce:Base64(HMACSHA256(room_id:Base64(timestamp):nonce)); */
+   /* Token FORMULA:
+        Base64UrlSafe(timestamp):Base64UrlSafe(nonce):Base64UrlSafe(HMACSHA256(id:Base64UrlSafe(timestamp):Base64UrlSafe(nonce)));  */
    /* Verify timestamp */
    gsize timestamp_len;
    guchar *timestamp = g_base64_decode(parts[0],&timestamp_len);
@@ -7787,8 +7782,7 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);    
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  token_ttl_ms  :%d \n",token_ttl_ms);
-   if(real_time - timestamp_time > token_ttl_ms) {
+   if(real_time >  timestamp_time) {
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail,  Verify timestamp\n");
         goto fail;
     }
