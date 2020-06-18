@@ -7771,17 +7771,40 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail, Token should have exactly one data and middle and  one hash part \n");
         goto fail;
     }
-   /* Token FORMULA:
-        Base64UrlSafe(timestamp):Base64UrlSafe(nonce):Base64UrlSafe(HMACSHA256(id:Base64UrlSafe(timestamp):Base64UrlSafe(nonce)));  */
-   /* Verify timestamp */
-   gsize timestamp_len;
-   guchar *timestamp = g_base64_decode(parts[0],&timestamp_len);
-   gint64 timestamp_time = strtoll((gchar*)timestamp, NULL, 10);
-   gint64 real_time = janus_get_real_time() / 1000;
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);    
-   if(real_time >  timestamp_time) {
+    /* Token FORMULA:
+         Base64UrlSafe(timestamp):Base64UrlSafe(nonce):Base64UrlSafe(HMACSHA256(id:Base64UrlSafe(timestamp):Base64UrlSafe(nonce)));  */
+  /* translate timeout from URL safe  string  to unsafe */
+    char timestampBase64[XL_BUFFER_SIZE] = {0};
+    const unsigned char *timestampBase64Safe = (const unsigned char *)parts[0];
+    size_t timestampBase64SafeLen = strlen((char *)timestampBase64Safe);
+
+    for(unsigned int i=0; i < XL_BUFFER_SIZE  ; i++) {
+      timestampBase64[i]='=';
+    }
+
+    for(unsigned int i=0,j=0;i< timestampBase64SafeLen ; i++,j++) {
+       switch(timestampBase64Safe[i]) {
+         case '_':
+            timestampBase64[j]= '/';
+            continue;
+         case '-':
+            timestampBase64[j]= '+';
+         continue;
+         default:
+            timestampBase64[j]=timestampBase64Safe[i];
+         continue;
+      }
+    }
+
+    /* Verify timestamp */
+    gsize timestamp_len;
+    guchar *timestamp = g_base64_decode(timestampBase64,&timestamp_len);
+    gint64 timestamp_time = strtoll((gchar*)timestamp, NULL, 10);
+    gint64 real_time = janus_get_real_time() / 1000;
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);    
+    if(real_time >  timestamp_time) {
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail,  Verify timestamp\n");
         goto fail;
     }
