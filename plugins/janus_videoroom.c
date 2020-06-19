@@ -1070,7 +1070,7 @@ room-<unique room ID>: {
 #include "../ip-utils.h"
 #include <sys/types.h>
 #include <sys/socket.h>
-
+#include <string.h>
 
 /* Plugin information */
 #define JANUS_VIDEOROOM_VERSION			9
@@ -7777,22 +7777,19 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
     char timestampBase64[XL_BUFFER_SIZE] = {0};
     const unsigned char *timestampBase64Safe = (const unsigned char *)parts[0];
     size_t timestampBase64SafeLen = strlen((char *)timestampBase64Safe);
+    memset(timestampBase64,'=',XL_BUFFER_SIZE);
 
-    for(unsigned int i=0; i < XL_BUFFER_SIZE  ; i++) {
-      timestampBase64[i]='=';
-    }
-
-    for(unsigned int i=0,j=0;i< timestampBase64SafeLen ; i++,j++) {
+    for(unsigned int i=0;i< timestampBase64SafeLen ; i++) {
        switch(timestampBase64Safe[i]) {
          case '_':
-            timestampBase64[j]= '/';
-            continue;
+            timestampBase64[i]= '/';
+            break;
          case '-':
-            timestampBase64[j]= '+';
-         continue;
+            timestampBase64[i]= '+';
+         break;
          default:
-            timestampBase64[j]=timestampBase64Safe[i];
-         continue;
+            timestampBase64[i]=timestampBase64Safe[i];
+        break;
       }
     }
 
@@ -7826,20 +7823,21 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  base64:  %s \n",base64);
    /* translate to URL safe  string */
     char singatureBase64URLSafe[XL_BUFFER_SIZE] = { 0 };
-    for(unsigned int i=0,j=0;i< strlen(base64); i++,j++) {
+    memset(singatureBase64URLSafe,'\0',XL_BUFFER_SIZE);
+    for(unsigned int i=0 ; i < strlen(base64); i++) {
      switch(base64[i]) {
       case '/':
-       singatureBase64URLSafe[j]= '_';
-      continue;
+       singatureBase64URLSafe[i]= '_';
+      break;
       case '+':
-       singatureBase64URLSafe[j]= '-';
-      continue;
+       singatureBase64URLSafe[i]= '-';
+      break;
       case '=':
-       singatureBase64URLSafe[j]= '\0';
-      continue;
+       singatureBase64URLSafe[i]= '\0';
+      break;
      default:
-       singatureBase64URLSafe[j]=base64[i];
-     continue;
+       singatureBase64URLSafe[i]=base64[i];
+     break;
      }
     }
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth: singatureBase64URLSafe:%s \n",singatureBase64URLSafe);
