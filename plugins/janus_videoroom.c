@@ -1070,7 +1070,7 @@ room-<unique room ID>: {
 #include "../ip-utils.h"
 #include <sys/types.h>
 #include <sys/socket.h>
-
+#include <string.h>
 
 /* Plugin information */
 #define JANUS_VIDEOROOM_VERSION			9
@@ -1329,7 +1329,6 @@ static gboolean string_ids = FALSE;
 static janus_callbacks *gateway = NULL;
 static GThread *handler_thread;
 static char *auth_secret = NULL;      /*CARBYNE-AUT*/
-static uint32_t token_ttl_ms = 0;     /*CARBYNE-AUT*/
 static char *rtsp_url = NULL;         /*CARBYNE-RF*/
 static gboolean auth_enabled = FALSE; /*CARBYNE-AUT*/
 static gboolean janus_auth_check_signature(const char *token, const char *room) ;/*CARBYNE-AUT*/
@@ -2072,12 +2071,6 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
                     JANUS_LOG(LOG_VERB, "auth_secret: %s\n", auth_secret);
                 }
 
-                janus_config_item *token_ttl_ms_item = janus_config_get(config, config_general, janus_config_type_item, "token_ttl_ms");
-
-                if(token_ttl_ms_item != NULL && token_ttl_ms_item->value != NULL) {
-                        token_ttl_ms  = atol(token_ttl_ms_item->value);
-		}
-                JANUS_LOG(LOG_VERB, "token_ttl_ms: %uld\n", token_ttl_ms);
                 /*CARBYNE-AUT end*/
 		/* Any admin key to limit who can "create"? */
 		janus_config_item *key = janus_config_get(config, config_general, janus_config_type_item, "admin_key");
@@ -7778,17 +7771,37 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail, Token should have exactly one data and middle and  one hash part \n");
         goto fail;
     }
-   /* Room token FORMULA: Base64(timestamp):nonce:Base64(HMACSHA256(room_id:Base64(timestamp):nonce)); */
-   /* Verify timestamp */
-   gsize timestamp_len;
-   guchar *timestamp = g_base64_decode(parts[0],&timestamp_len);
-   gint64 timestamp_time = strtoll((gchar*)timestamp, NULL, 10);
-   gint64 real_time = janus_get_real_time() / 1000;
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);    
-   JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  token_ttl_ms  :%d \n",token_ttl_ms);
-   if(real_time - timestamp_time > token_ttl_ms) {
+    /* Token FORMULA:
+         Base64UrlSafe(timestamp):Base64UrlSafe(nonce):Base64UrlSafe(HMACSHA256(id:Base64UrlSafe(timestamp):Base64UrlSafe(nonce)));  */
+  /* translate timeout from URL safe  string  to unsafe */
+    char timestampBase64[XL_BUFFER_SIZE] = {0};
+    const unsigned char *timestampBase64Safe = (const unsigned char *)parts[0];
+    size_t timestampBase64SafeLen = strlen((char *)timestampBase64Safe);
+    memset(timestampBase64,'=',XL_BUFFER_SIZE);
+
+    for(unsigned int i=0;i< timestampBase64SafeLen ; i++) {
+       switch(timestampBase64Safe[i]) {
+         case '_':
+            timestampBase64[i]= '/';
+            break;
+         case '-':
+            timestampBase64[i]= '+';
+         break;
+         default:
+            timestampBase64[i]=timestampBase64Safe[i];
+        break;
+      }
+    }
+
+    /* Verify timestamp */
+    gsize timestamp_len;
+    guchar *timestamp = g_base64_decode(timestampBase64,&timestamp_len);
+    gint64 timestamp_time = strtoll((gchar*)timestamp, NULL, 10);
+    gint64 real_time = janus_get_real_time() / 1000;
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);    
+    if(real_time >  timestamp_time) {
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail,  Verify timestamp\n");
         goto fail;
     }
@@ -7810,20 +7823,21 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  base64:  %s \n",base64);
    /* translate to URL safe  string */
     char singatureBase64URLSafe[XL_BUFFER_SIZE] = { 0 };
-    for(unsigned int i=0,j=0;i< strlen(base64); i++,j++) {
+    memset(singatureBase64URLSafe,'\0',XL_BUFFER_SIZE);
+    for(unsigned int i=0 ; i < strlen(base64); i++) {
      switch(base64[i]) {
       case '/':
-       singatureBase64URLSafe[j]= '_';
-      continue;
+       singatureBase64URLSafe[i]= '_';
+      break;
       case '+':
-       singatureBase64URLSafe[j]= '-';
-      continue;
+       singatureBase64URLSafe[i]= '-';
+      break;
       case '=':
-       singatureBase64URLSafe[j]= '\0';
-      continue;
+       singatureBase64URLSafe[i]= '\0';
+      break;
      default:
-       singatureBase64URLSafe[j]=base64[i];
-     continue;
+       singatureBase64URLSafe[i]=base64[i];
+     break;
      }
     }
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth: singatureBase64URLSafe:%s \n",singatureBase64URLSafe);

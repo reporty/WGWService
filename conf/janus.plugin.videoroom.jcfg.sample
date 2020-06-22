@@ -49,7 +49,6 @@ general: {
 	# In case you want to use strings instead (e.g., a UUID), set string_ids to true.
         string_ids = true
         plugin_auth_secret="SECRET_FOR_CREATE_JOIN_TOKEN" #Secret Key
-        token_ttl_ms=300000 #Autentication token time to live 
         rtsp_url="rtsp://PUBLISHING_URL_INCLUDE_FILE_PREFIX"
 }
 room-1234: {
