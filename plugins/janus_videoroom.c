@@ -1481,6 +1481,7 @@ typedef struct janus_videoroom_session {
 	volatile gint dataready;
 	volatile gint hangingup;
 	volatile gint destroyed;
+        volatile gint gstrun; /*CARBYNE-GST*/
 	janus_mutex mutex;
 	janus_refcount ref;
        /*CARBYNE-GST*/
@@ -1490,11 +1491,6 @@ typedef struct janus_videoroom_session {
         gboolean is_gst;
         //GAsyncQueue * vpackets;
         /*CARBYNE-GST end*/
- /*CARBYNE-logic*/
-        guint64 room_id;                        /* Unique room ID (when using integers) */
-        gchar *room_id_str;                     /* Unique room ID (when using strings) */ 
-/*CARBYNE-logic*/
-
 } janus_videoroom_session;
 static GHashTable *sessions;
 static janus_mutex sessions_mutex = JANUS_MUTEX_INITIALIZER;
@@ -1762,8 +1758,6 @@ static void janus_videoroom_session_free(const janus_refcount *session_ref) {
 	janus_refcount_decrease(&session->handle->ref);
 	/* This session can be destroyed, free all the resources */
 	janus_mutex_destroy(&session->mutex);
-	JANUS_LOG(LOG_ERR, "[%s-%p] ::::Destroyed string  session->room_id_str: %p  \n", JANUS_VIDEOROOM_PACKAGE,session ,session->room_id_str);
-	g_free(session->room_id_str); /*CARBYNE-logic*/
 	g_free(session);
 }
 
@@ -2508,7 +2502,6 @@ void janus_videoroom_destroy(void) {
            janus_videoroom_session * session = value;
               if (!session->destroyed && session->gstr != NULL) {
                  janus_gstr * gstr = session->gstr;
-                 g_free(session->room_id_str); /*CARBYNE-logic*/
                  gst_object_unref (gstr->bus);
                  gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
                  if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
@@ -3398,9 +3391,6 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		g_hash_table_insert(rooms,
 			string_ids ? (gpointer)g_strdup(videoroom->room_id_str) : (gpointer)janus_uint64_dup(videoroom->room_id),
 			videoroom);
-		session->room_id  = videoroom->room_id; /* CARBYNE-logic */
-		session->room_id_str= (gpointer)g_strdup(videoroom->room_id_str); /*CARBYNE-logic */
-		JANUS_LOG(LOG_ERR, "[%s-%p] ::::Added room session->room_id_str: %p \n", JANUS_VIDEOROOM_PACKAGE,session ,session->room_id_str);
 		/* Show updated rooms list */
 		GHashTableIter iter;
 		gpointer value;
@@ -5487,9 +5477,16 @@ static void * janus_gst_gst_thread (void * data) {
     }
     JANUS_LOG (LOG_INFO, "---------------START GST THREAD WHILE --------------\n");
     JANUS_LOG (LOG_INFO, "Joining gstr thread..\n");
-    while (!g_atomic_int_get (&stopping) && g_atomic_int_get(&initialized) && !g_atomic_int_get(&session->hangingup)) {
 
+    janus_refcount_increase(&session->ref);
+    g_atomic_int_set(&session->gstrun, 1);
+    while (!g_atomic_int_get (&stopping) && 
+	    g_atomic_int_get(&initialized) && 
+            !g_atomic_int_get(&session->hangingup) &&
+            g_atomic_int_get(&session->gstrun)) {
     }
+    usleep(500000);
+
     JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --------------\n");
     gst_object_unref (player->bus);
     gst_element_set_state (player->pipeline, GST_STATE_NULL);
@@ -5503,7 +5500,7 @@ static void * janus_gst_gst_thread (void * data) {
     JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD  --------------\n");
     JANUS_LOG (LOG_INFO, "Leaving gstr pipeline thread..\n");
     g_thread_unref (g_thread_self());
-
+    janus_refcount_decrease(&session->ref);
     return NULL;
 }
 /*CARBYNE-GST-end*/
@@ -5778,9 +5775,6 @@ static void janus_videoroom_recorder_close(janus_videoroom_publisher *participan
 void janus_videoroom_hangup_media(janus_plugin_session *handle) {
 	guint64 room_id = 0;
 	char  *room_id_str = NULL;
-	janus_videoroom_p_type participant_type = janus_videoroom_p_type_none;
-
-
 
 	JANUS_LOG(LOG_INFO, "[%s-%p] No WebRTC media anymore; %p %p\n", JANUS_VIDEOROOM_PACKAGE, handle, handle->gateway_handle, handle->plugin_handle);
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
@@ -5801,7 +5795,6 @@ void janus_videoroom_hangup_media(janus_plugin_session *handle) {
 
 	if(session->participant_type == janus_videoroom_p_type_publisher)  {
         	janus_videoroom_publisher *publisher = (janus_videoroom_publisher *)session->participant;
-        	participant_type = session->participant_type;
 		if(publisher && publisher->room) {
 			room_id = publisher->room_id;
 			room_id_str = publisher->room_id_str ? g_strdup(publisher->room_id_str): NULL;
@@ -5826,62 +5819,46 @@ void janus_videoroom_hangup_media(janus_plugin_session *handle) {
 					return;
              			}
          		}
-          		/*CARBYNE-RF FREE */
-          		janus_videoroom *videoroom =   g_hash_table_lookup(rooms, string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
-          		JANUS_LOG(LOG_INFO, "CARBYNE::::REMOVE   video_rtp_forward_stream_id: %"SCNu64"\n",videoroom->video_rtp_forward_stream_id );
-          		janus_mutex_lock(&publisher->rtp_forwarders_mutex);
-          		if(!g_hash_table_remove(publisher->rtp_forwarders, GUINT_TO_POINTER(videoroom->video_rtp_forward_stream_id))) {
-	             		JANUS_LOG(LOG_ERR, "No such stream (%"SCNu64")\n", videoroom->video_rtp_forward_stream_id);
-  	                        janus_refcount_increase(&session->ref);	
-				janus_mutex_unlock(&sessions_mutex);
-			        janus_videoroom_hangup_media_internal(handle);  
-                                janus_refcount_decrease(&session->ref);
-				janus_mutex_lock(&sessions_mutex);
-			}
-          		janus_mutex_unlock(&publisher->rtp_forwarders_mutex);
-          		/*CARBYNE-RF-end FREE  */
-        	}
-        	else {
-			JANUS_LOG(LOG_ERR, "[%s-%p] No WebRTC publisher && publisher->room \n", JANUS_VIDEOROOM_PACKAGE, handle);
-			JANUS_LOG(LOG_ERR, "[%s-%p] session->room_id_str: %s \n", JANUS_VIDEOROOM_PACKAGE, handle,session->room_id_str);
-			JANUS_LOG(LOG_ERR, "[%s-%p] session->participant_type: %d \n", JANUS_VIDEOROOM_PACKAGE, handle,session->participant_type); 
-			room_id = session->room_id;
-			room_id_str = session->room_id_str ? g_strdup(session->room_id_str): NULL;
-			participant_type = session->participant_type;
-		}
-	}        
-	janus_mutex_unlock(&sessions_mutex);
-	/*CARBYNE-LOGIC end patch */
-	if(participant_type == janus_videoroom_p_type_publisher || participant_type == janus_videoroom_p_type_none ) {
-        	int error;
-		janus_videoroom_destroy_session(handle, &error);
- 		g_atomic_int_set(&session->hangingup, 1);
 
-        	JANUS_LOG(LOG_INFO, "CARBYNE:::PUBLISHER  logic-2 for room (%"SCNu64") %s\n", room_id, room_id_str );
-        	if((!string_ids && room_id) || (string_ids && (room_id_str != NULL)))  {
-			janus_videoroom *videoroom =  g_hash_table_lookup(rooms,string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
-			if(videoroom) {
- 				/* Remove room, but add a reference until we're done */
-				if(!string_ids) {
-					JANUS_LOG(LOG_INFO, "PUBLISHER: Remove room %"SCNu64" permanently \n",room_id);
+       	                janus_videoroom *videoroom =  g_hash_table_lookup(rooms,string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
+               	        if(videoroom) {
+                       	        /* Remove room, but add a reference until we're done */
+                             	if(!string_ids) {
+                                       	JANUS_LOG(LOG_INFO, "PUBLISHER: Remove room %"SCNu64" permanently \n",room_id);
+                       		}
+                       		else {
+                         	 	JANUS_LOG(LOG_INFO, "PUBLISHER: Remove room %s permanently \n", room_id_str);
+                        	}
+                        	janus_mutex_lock(&videoroom->mutex);
+                        	janus_refcount_increase(&videoroom->ref);
+                        	g_hash_table_remove(rooms, string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
+                        	g_free(room_id_str);
+
+          			/*CARBYNE-RF FREE */
+          			JANUS_LOG(LOG_INFO, "CARBYNE::::REMOVE   video_rtp_forward_stream_id: %"SCNu64"\n",videoroom->video_rtp_forward_stream_id );
+          			janus_mutex_lock(&publisher->rtp_forwarders_mutex);
+          			if(!g_hash_table_remove(publisher->rtp_forwarders, GUINT_TO_POINTER(videoroom->video_rtp_forward_stream_id))) {
+	             			JANUS_LOG(LOG_ERR, "No such stream (%"SCNu64")\n", videoroom->video_rtp_forward_stream_id);
+				}
+          			janus_mutex_unlock(&publisher->rtp_forwarders_mutex);
+          			/*CARBYNE-RF-end FREE  */
+
+				janus_mutex_unlock(&videoroom->mutex);
+                                janus_refcount_decrease(&videoroom->ref);
 			}
-			else {
-				JANUS_LOG(LOG_INFO, "PUBLISHER: Remove room %s permanently \n", room_id_str);
-			}
-			janus_mutex_lock(&videoroom->mutex);
-			janus_refcount_increase(&videoroom->ref);
-			g_hash_table_remove(rooms, string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
- 			g_free(room_id_str);
-			/*CARBYNE-RF FREE */
-			janus_mutex_unlock(&videoroom->mutex);
-			janus_refcount_decrease(&videoroom->ref);
+	     	}
+        	else {
+			JANUS_LOG(LOG_WARN, "[%s-%p] No WebRTC publisher && publisher->room \n", JANUS_VIDEOROOM_PACKAGE, handle);
 		}
 	}
-     } else if(session->participant_type == janus_videoroom_p_type_subscriber) {
-       JANUS_LOG(LOG_INFO, "CARBYNE:::SUBSCRIBER  logic\n");
-         janus_videoroom_hangup_media_internal(handle);
-      }
-     JANUS_LOG(LOG_ERR, "End of janus_videoroom_hangup_media \n"); /*CARBYNE*/
+
+	janus_refcount_increase(&session->ref);
+	janus_mutex_unlock(&sessions_mutex);
+	janus_videoroom_hangup_media_internal(session);
+	janus_refcount_decrease(&session->ref);
+
+	/*CARBYNE-LOGIC end patch */
+	JANUS_LOG(LOG_ERR, "End of janus_videoroom_hangup_media \n"); /*CARBYNE*/
 }
 
 static void janus_videoroom_hangup_subscriber(janus_videoroom_subscriber * s) {
@@ -5930,6 +5907,7 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 	g_atomic_int_set(&session->dataready, 0);
 	/* Send an event to the browser and tell the PeerConnection is over */
 	if(session->participant_type == janus_videoroom_p_type_publisher) {
+		g_atomic_int_set(&session->gstrun, 0);/*CARBYNE-GST */
 		/* This publisher just 'unpublished' */
 		janus_videoroom_publisher *participant = janus_videoroom_session_get_publisher(session);
 		/* Get rid of the recorders, if available */
@@ -5966,7 +5944,7 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 		}
 		GSList *subscribers = participant->subscribers;
 		participant->subscribers = NULL;
-		
+
 		/* Hangup all subscribers */
 		while(subscribers) {
 			janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)subscribers->data;
@@ -5999,7 +5977,7 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 				}
 				janus_mutex_lock(&publisher->subscribers_mutex);
 				publisher->subscribers = g_slist_remove(publisher->subscribers, subscriber);
-				
+
 				janus_videoroom_hangup_subscriber(subscriber);
 				janus_mutex_unlock(&publisher->subscribers_mutex);
 			}
