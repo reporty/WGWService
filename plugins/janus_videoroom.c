@@ -5484,8 +5484,9 @@ static void * janus_gst_gst_thread (void * data) {
 	    g_atomic_int_get(&initialized) && 
             !g_atomic_int_get(&session->hangingup) &&
             g_atomic_int_get(&session->gstrun)) {
+	usleep(50000); //0.05s
     }
-    usleep(500000);
+    usleep(500000); //0.5s
 
     JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --------------\n");
     gst_object_unref (player->bus);
