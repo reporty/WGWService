@@ -5484,8 +5484,9 @@ static void * janus_gst_gst_thread (void * data) {
 	    g_atomic_int_get(&initialized) && 
             !g_atomic_int_get(&session->hangingup) &&
             g_atomic_int_get(&session->gstrun)) {
+	usleep(50000); //0.05s
     }
-    usleep(500000);
+    usleep(500000); //0.5s
 
     JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --------------\n");
     gst_object_unref (player->bus);
@@ -5821,18 +5822,10 @@ void janus_videoroom_hangup_media(janus_plugin_session *handle) {
          		}
 
        	                janus_videoroom *videoroom =  g_hash_table_lookup(rooms,string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
+			g_free(room_id_str);
                	        if(videoroom) {
-                       	        /* Remove room, but add a reference until we're done */
-                             	if(!string_ids) {
-                                       	JANUS_LOG(LOG_INFO, "PUBLISHER: Remove room %"SCNu64" permanently \n",room_id);
-                       		}
-                       		else {
-                         	 	JANUS_LOG(LOG_INFO, "PUBLISHER: Remove room %s permanently \n", room_id_str);
-                        	}
                         	janus_mutex_lock(&videoroom->mutex);
                         	janus_refcount_increase(&videoroom->ref);
-                        	g_hash_table_remove(rooms, string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
-                        	g_free(room_id_str);
 
           			/*CARBYNE-RF FREE */
           			JANUS_LOG(LOG_INFO, "CARBYNE::::REMOVE   video_rtp_forward_stream_id: %"SCNu64"\n",videoroom->video_rtp_forward_stream_id );
