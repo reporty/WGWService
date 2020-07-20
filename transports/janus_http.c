@@ -127,6 +127,7 @@ typedef struct janus_http_msg {
 	char *response;						/* The response from the core as a string */
 	size_t resplen;						/* Length of the response in octets */
 	GSource *timeout;					/* Timeout monitor, if any */
+	volatile gint timeout_flag;			/* Whether a timeout hasn't fired yet */
 	volatile gint destroyed;			/* Whether this session has been destroyed */
 	janus_refcount ref;					/* Reference counter for this message */
 } janus_http_msg;
@@ -163,9 +164,9 @@ typedef struct janus_http_session {
 	janus_refcount ref;			/* Reference counter for this session */
 } janus_http_session;
 /* We keep track of created sessions as we handle long polls */
-const char *keepalive_id = "keepalive";
-GHashTable *sessions = NULL;
-janus_mutex sessions_mutex = JANUS_MUTEX_INITIALIZER;
+static const char *keepalive_id = "keepalive";
+static GHashTable *sessions = NULL;
+static janus_mutex sessions_mutex = JANUS_MUTEX_INITIALIZER;
 
 static void janus_http_session_destroy(janus_http_session *session) {
 	if(session && g_atomic_int_compare_and_exchange(&session->destroyed, 0, 1))
@@ -182,6 +183,52 @@ static void janus_http_session_free(const janus_refcount *session_ref) {
 		g_async_queue_unref(session->events);
 	}
 	g_free(session);
+}
+
+
+/* Custom GSource for tracking request timeouts (including long polls) */
+typedef struct janus_http_request_timeout {
+	GSource source;
+	janus_transport_session *ts;
+	janus_http_session *session;
+} janus_http_request_timeout;
+/* Helper to handle timeouts */
+static void janus_http_timeout(janus_transport_session *ts, janus_http_session *session);
+/* GSource Functions */
+static gboolean janus_http_request_timeout_dispatch(GSource *source, GSourceFunc callback, gpointer user_data) {
+	JANUS_LOG(LOG_DBG, "[%p] dispatch\n", source);
+	janus_http_request_timeout *t = (janus_http_request_timeout *)source;
+	/* Timeout fired, invoke the function */
+	janus_http_timeout(t->ts, t->session);
+	/* We're done */
+	g_source_destroy(source);
+	g_source_unref(source);
+	return G_SOURCE_REMOVE;
+}
+static void janus_http_request_timeout_finalize(GSource *source) {
+	JANUS_LOG(LOG_DBG, "[%p] finalize\n", source);
+	janus_http_request_timeout *timeout = (janus_http_request_timeout *)source;
+	if(timeout) {
+		if(timeout->session)
+			janus_refcount_decrease(&timeout->session->ref);
+		if(timeout->ts)
+			janus_refcount_decrease(&timeout->ts->ref);
+	}
+}
+static GSourceFuncs janus_http_request_timeout_funcs = {
+	NULL, NULL,
+	janus_http_request_timeout_dispatch,
+	janus_http_request_timeout_finalize,
+	NULL, NULL
+};
+static GSource *janus_http_request_timeout_create(janus_transport_session *ts, janus_http_session *session, gint timeout) {
+	GSource *source = g_source_new(&janus_http_request_timeout_funcs, sizeof(janus_http_request_timeout));
+	janus_http_request_timeout *t = (janus_http_request_timeout *)source;
+	t->ts = ts;
+	t->session = session;
+	g_source_set_ready_time(source, janus_get_monotonic_time() + timeout*G_USEC_PER_SEC);
+	JANUS_LOG(LOG_DBG, "[%p] create (%d)\n", source, timeout);
+	return source;
 }
 
 
@@ -209,8 +256,6 @@ static int janus_http_return_success(janus_transport_session *ts, char *payload)
 /* Helper to quickly send an error response */
 static int janus_http_return_error(janus_transport_session *ts, uint64_t session_id,
 	const char *transaction, gint error, const char *format, ...) G_GNUC_PRINTF(5, 6);
-/* Helper to handle timeouts */
-static gboolean janus_http_timeout(gpointer user_data);
 
 
 /* MHD Web Server */
@@ -226,8 +271,8 @@ static char *admin_ws_path = NULL;
 static char *allow_origin = NULL;
 
 /* REST and Admin/Monitor ACL list */
-GList *janus_http_access_list = NULL, *janus_http_admin_access_list = NULL;
-janus_mutex access_list_mutex;
+static GList *janus_http_access_list = NULL, *janus_http_admin_access_list = NULL;
+static janus_mutex access_list_mutex;
 static void janus_http_allow_address(const char *ip, gboolean admin) {
 	if(ip == NULL)
 		return;
@@ -544,6 +589,7 @@ int janus_http_init(janus_transport_callbacks *callback, const char *config_path
 	if(error != NULL) {
 		JANUS_LOG(LOG_FATAL, "Got error %d (%s) trying to start HTTP timer...\n",
 			error->code, error->message ? error->message : "??");
+		g_error_free(error);
 		return -1;
 	}
 
@@ -952,10 +998,9 @@ int janus_http_send_message(janus_transport_session *transport, void *request_id
 			if(msg && g_atomic_pointer_compare_and_exchange(&msg->longpoll, session, NULL)) {
 				janus_refcount_increase(&msg->ref);
 				/* Send the events back */
-				if(msg->timeout != NULL) {
+				if(g_atomic_int_compare_and_exchange(&msg->timeout_flag, 1, 0)) {
 					g_source_destroy(msg->timeout);
-					janus_refcount_decrease(&session->ref);
-					janus_refcount_decrease(&transport->ref);
+					g_source_unref(msg->timeout);
 				}
 				msg->timeout = NULL;
 				janus_http_notifier(msg);
@@ -995,9 +1040,9 @@ int janus_http_send_message(janus_transport_session *transport, void *request_id
 			janus_refcount_decrease(&msg->ref);
 			return -1;
 		}
-		if(msg->timeout != NULL) {
+		if(g_atomic_int_compare_and_exchange(&msg->timeout_flag, 1, 0)) {
 			g_source_destroy(msg->timeout);
-			janus_refcount_decrease(&transport->ref);
+			g_source_unref(msg->timeout);
 		}
 		msg->timeout = NULL;
 		char *response_text = json_dumps(message, json_format);
@@ -1062,7 +1107,7 @@ void janus_http_session_claimed(janus_transport_session *transport, guint64 sess
 	janus_mutex_unlock(&sessions_mutex);
 	if(old_session == NULL)
 		return;
-	/* Were there a long polls waiting? */
+	/* Were there long polls waiting? */
 	janus_mutex_lock(&old_session->mutex);
 	janus_http_msg *msg = NULL;
 	while(old_session->longpolls) {
@@ -1070,18 +1115,14 @@ void janus_http_session_claimed(janus_transport_session *transport, guint64 sess
 		msg = (janus_http_msg *)(transport ? transport->transport_p : NULL);
 		if(msg != NULL) {
 			janus_refcount_increase(&msg->ref);
-			if(msg->timeout != NULL) {
+			if(g_atomic_int_compare_and_exchange(&msg->timeout_flag, 1, 0)) {
 				g_source_destroy(msg->timeout);
-				janus_refcount_decrease(&old_session->ref);
-				janus_refcount_decrease(&transport->ref);
+				g_source_unref(msg->timeout);
 			}
 			msg->timeout = NULL;
 			if(g_atomic_pointer_compare_and_exchange(&msg->longpoll, session, NULL)) {
-				/* Add a new timeout that fires right away to return an error */
-				janus_refcount_increase(&transport->ref);
-				msg->timeout = g_timeout_source_new_seconds(0);
-				g_source_set_callback(msg->timeout, janus_http_timeout, transport, NULL);
-				g_source_attach(msg->timeout, httpctx);
+				/* Return an error on the long poll right away */
+				janus_http_timeout(transport, old_session);
 			}
 			janus_refcount_decrease(&msg->ref);
 		}
@@ -1189,6 +1230,8 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
 	}
 	/* Parse request */
 	if(strcasecmp(method, "GET") && strcasecmp(method, "POST") && strcasecmp(method, "OPTIONS")) {
+		if(firstround)
+			return ret;
 		ret = janus_http_return_error(ts, 0, NULL, JANUS_ERROR_TRANSPORT_SPECIFIC, "Unsupported method %s", method);
 		goto done;
 	}
@@ -1297,7 +1340,7 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
 		goto parsingdone;
 	}
 
-        /* CARBYNE-SHC start */
+       /* CARBYNE-SHC start */
 	if(session_path != NULL && !strcmp(session_path, "SanityHealthCheck"))
         {
                /* The info REST endpoint, if contacted through a GET, provides information on the Janus core */
@@ -1474,8 +1517,8 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
 				/* We won't wait forever for an answer (about 30 seconds) */
 				janus_refcount_increase(&ts->ref);
 				janus_refcount_increase(&session->ref);
-				msg->timeout = g_timeout_source_new_seconds(30);
-				g_source_set_callback(msg->timeout, janus_http_timeout, ts, NULL);
+				g_atomic_int_set(&msg->timeout_flag, 1);
+				msg->timeout = janus_http_request_timeout_create(ts, session, 30);
 				g_source_attach(msg->timeout, httpctx);
 				/* Mark this connection as the long poll for this session */
 				msg->max_events = max_events;
@@ -1543,8 +1586,8 @@ parsingdone:
 		MHD_destroy_response(response);
 		/* We won't wait forever for an answer (about 10 seconds) */
 		janus_refcount_increase(&ts->ref);
-		msg->timeout = g_timeout_source_new_seconds(10);
-		g_source_set_callback(msg->timeout, janus_http_timeout, ts, NULL);
+		g_atomic_int_set(&msg->timeout_flag, 1);
+		msg->timeout = janus_http_request_timeout_create(ts, NULL, 10);
 		g_source_attach(msg->timeout, httpctx);
 		/* Pass the ball to the core */
 		JANUS_LOG(LOG_HUGE, "Forwarding request to the core (%p)\n", msg);
@@ -1578,7 +1621,7 @@ static int janus_http_admin_handler(void *cls, struct MHD_Connection *connection
 	int firstround = 0;
 	janus_transport_session *ts = (janus_transport_session *)*ptr;
 	janus_http_msg *msg = NULL;
-	if (ts == NULL) {
+	if(ts == NULL) {
 		firstround = 1;
 		JANUS_LOG(LOG_VERB, "Got an admin/monitor HTTP %s request on %s...\n", method, url);
 		JANUS_LOG(LOG_DBG, " ... Just parsing headers for now...\n");
@@ -1618,12 +1661,10 @@ static int janus_http_admin_handler(void *cls, struct MHD_Connection *connection
 	}
 	/* Parse request */
 	if(strcasecmp(method, "GET") && strcasecmp(method, "POST") && strcasecmp(method, "OPTIONS")) {
-		JANUS_LOG(LOG_ERR, "Unsupported method...\n");
-		response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
-		janus_http_add_cors_headers(msg, response);
-		ret = MHD_queue_response(connection, MHD_HTTP_NOT_IMPLEMENTED, response);
-		MHD_destroy_response(response);
-		return ret;
+		if(firstround)
+			return ret;
+		ret = janus_http_return_error(ts, 0, NULL, JANUS_ERROR_TRANSPORT_SPECIFIC, "Unsupported method %s", method);
+		goto done;
 	}
 	if(!strcasecmp(method, "OPTIONS")) {
 		response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
@@ -1787,8 +1828,8 @@ parsingdone:
 		MHD_destroy_response(response);
 		/* We won't wait forever for an answer (about 10 seconds) */
 		janus_refcount_increase(&ts->ref);
-		msg->timeout = g_timeout_source_new_seconds(10);
-		g_source_set_callback(msg->timeout, janus_http_timeout, ts, NULL);
+		g_atomic_int_set(&msg->timeout_flag, 1);
+		msg->timeout = janus_http_request_timeout_create(ts, NULL, 10);
 		g_source_attach(msg->timeout, httpctx);
 		/* Pass the ball to the core */
 		JANUS_LOG(LOG_HUGE, "Forwarding admin request to the core (%p)\n", msg);
@@ -1833,11 +1874,9 @@ static void janus_http_request_completed(void *cls, struct MHD_Connection *conne
 		janus_http_session *session = (janus_http_session *)g_atomic_pointer_get(&request->longpoll);
 		if(session != NULL)
 			janus_refcount_increase(&session->ref);
-		if(request->timeout != NULL) {
+		if(g_atomic_int_compare_and_exchange(&request->timeout_flag, 1, 0)) {
 			g_source_destroy(request->timeout);
-			if(session != NULL)
-				janus_refcount_decrease(&session->ref);
-			janus_refcount_decrease(&ts->ref);
+			g_source_unref(request->timeout);
 		}
 		request->timeout = NULL;
 		if(session) {
@@ -1947,8 +1986,7 @@ static int janus_http_return_success(janus_transport_session *ts, char *payload)
 	}
 	janus_http_msg *msg = (janus_http_msg *)ts->transport_p;
 	if(!msg || !msg->connection) {
-		if(payload)
-			free(payload);
+		g_free(payload);
 		return MHD_NO;
 	}
 	janus_refcount_increase(&msg->ref);
@@ -2000,13 +2038,20 @@ static int janus_http_return_error(janus_transport_session *ts, uint64_t session
 }
 
 /* Helper to handle timeouts */
-static gboolean janus_http_timeout(gpointer user_data) {
-	janus_transport_session *ts = (janus_transport_session *)user_data;
+void janus_http_timeout(janus_transport_session *ts, janus_http_session *session) {
+	if(g_atomic_int_get(&ts->destroyed))
+		return;
+	janus_refcount_increase(&ts->ref);
 	janus_http_msg *request = (janus_http_msg *)ts->transport_p;
+	if(!g_atomic_int_compare_and_exchange(&request->timeout_flag, 1, 0)) {
+		request->timeout = NULL;
+		janus_refcount_decrease(&ts->ref);
+		return;
+	}
 	request->timeout = NULL;
 	/* Is this a long poll timeout, simply meaning we had nothing to send so far? */
-	janus_http_session *session = (janus_http_session *)g_atomic_pointer_get(&request->longpoll);
 	if(session != NULL) {
+		janus_refcount_increase(&session->ref);
 		g_atomic_pointer_set(&request->longpoll, NULL);
 		/* Long poll, turn this into a "keepalive" response */
 		json_t *event = NULL;
@@ -2040,5 +2085,4 @@ static gboolean janus_http_timeout(gpointer user_data) {
 		MHD_resume_connection(request->connection);
 	}
 	janus_refcount_decrease(&ts->ref);
-	return G_SOURCE_REMOVE;
 }
