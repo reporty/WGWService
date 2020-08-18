@@ -1846,6 +1846,7 @@ static void janus_videoroom_reqpli(janus_videoroom_publisher *publisher, const c
 	publisher->fir_latest = janus_get_monotonic_time();
 }
 
+static int busCall(GstBus* bus, GstMessage* bus_msg, gpointer data);
 /* Error codes */
 #define JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR		499
 #define JANUS_VIDEOROOM_ERROR_NO_MESSAGE		421
@@ -5089,6 +5090,7 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                             	}
                          }
                          gstr->bus = gst_pipeline_get_bus (GST_PIPELINE (gstr->pipeline));
+                         gst_bus_add_watch (gstr->bus, busCall, gstr);
                          session->gstr = gstr;
                          GError * error = NULL;
                          g_thread_try_new ("gst", &janus_gst_gst_thread, session, &error);
@@ -5443,13 +5445,65 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 }
 
 /*CARBYNE-GST*/
-#define GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC 500000000
+#define GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC 500000000 //0.5s
+
+static int busCall(GstBus* bus, GstMessage* bus_msg, gpointer data) {
+     GError *bus_err;
+     gchar *bus_debug_info;
+//     janus_gstr * player  = (janus_gstr*)data;
+      if (bus_msg != NULL) {
+          switch (GST_MESSAGE_TYPE (bus_msg)) {
+             case GST_MESSAGE_ERROR:
+                gst_message_parse_error (bus_msg, &bus_err, &bus_debug_info);
+                JANUS_LOG (LOG_ERR, "CARBYNE:: Got GST BUS  error received from element %s: %d (%s) ...\n",GST_OBJECT_NAME (bus_msg->src), bus_err->code, bus_err->message ? bus_err->message : "??");
+                JANUS_LOG (LOG_ERR, "CARBYNE:: GST BUS Debugging information: %s\n", bus_debug_info ? bus_debug_info : "none");
+                g_clear_error (&bus_err);
+                g_free (bus_debug_info);
+    //            if (player == NULL)
+    //            {
+    //              JANUS_LOG (LOG_ERR, "CARBYNE:: player null\n");
+    //          }
+    //            else {
+    //           JANUS_LOG (LOG_ERR, "CARBYNE:: set PLAYING here.... \n");
+    //             // gst_element_set_state (player->pipeline, GST_STATE_PLAYING);
+   //            }
+//              if (gst_element_get_state (player->pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
+//                   JANUS_LOG (LOG_ERR, "Unable to play pipeline..!\n");
+//                   g_atomic_int_set(&session->gstrun,0);
+//}
+             break;
+             case GST_MESSAGE_EOS:
+               JANUS_LOG (LOG_INFO,"CARBYNE:: GST BUS End-Of-Stream reached.\n");
+               break;
+             case GST_MESSAGE_STATE_CHANGED: {
+               GstState oldState;
+               GstState newState;
+               GstState pending;
+               gst_message_parse_state_changed(bus_msg, &oldState, &newState, &pending);
+               switch (newState)
+               {
+                  case GST_STATE_VOID_PENDING:
+                  case GST_STATE_NULL:
+                  case GST_STATE_READY:
+                  case GST_STATE_PAUSED:
+                  case GST_STATE_PLAYING:
+                  JANUS_LOG (LOG_ERR,"CARBYNE::GST new state %d\n",newState);
+                    break;
+                  default:
+                     break;
+               }
+               break;
+             }
+             default:
+                JANUS_LOG (LOG_ERR,"CARBYNE::GST BUS Unexpected message received.\n");
+             break;
+          }
+     }
+     return TRUE;
+}
 
 static void * janus_gst_gst_thread (void * data) {
     JANUS_LOG (LOG_INFO, "---------------START GST THREAD --------------\n");
-    GstMessage *bus_msg;
-    GError *bus_err;
-    gchar *bus_debug_info;
     janus_videoroom_session * session = (janus_videoroom_session *) data;
     if (session == NULL) {
         JANUS_LOG (LOG_ERR, "invalid session!\n");
@@ -5483,35 +5537,13 @@ static void * janus_gst_gst_thread (void * data) {
 
     janus_refcount_increase(&session->ref);
     g_atomic_int_set(&session->gstrun, 1);
+
+
     while (!g_atomic_int_get (&stopping) && 
 	    g_atomic_int_get(&initialized) && 
             !g_atomic_int_get(&session->hangingup) &&
             g_atomic_int_get(&session->gstrun)) {
-
-//	usleep(50000); //0.05s
-       bus_msg = gst_bus_timed_pop_filtered (player->bus, 50000000, GST_MESSAGE_ERROR | GST_MESSAGE_EOS); //0.05s
-
-       /* Parse message */
-       if (bus_msg != NULL) {
-
-          switch (GST_MESSAGE_TYPE (bus_msg)) {
-             case GST_MESSAGE_ERROR:
-                gst_message_parse_error (bus_msg, &bus_err, &bus_debug_info);
-		JANUS_LOG (LOG_ERR, "Got GST BUS  error received from element %s: %d (%s) ...\n",GST_OBJECT_NAME (bus_msg->src), bus_err->code, bus_err->message ? bus_err->message : "??");
-                JANUS_LOG (LOG_ERR, "GST BUS Debugging information: %s\n", bus_debug_info ? bus_debug_info : "none");
-                g_clear_error (&bus_err);
-                g_free (bus_debug_info);
-             break;
-             case GST_MESSAGE_EOS:
-               JANUS_LOG (LOG_INFO,"GST BUS End-Of-Stream reached.\n");
-               break;
-             default:
-               /* We should not reach here because we only asked for ERRORs and EOS */
-                JANUS_LOG (LOG_ERR,"GST BUS Unexpected message received.\n");
-             break;
-          }
-          gst_message_unref (bus_msg);
-       }
+         usleep(5000000); //0.05s
     }
     usleep(500000); //0.5s
 
