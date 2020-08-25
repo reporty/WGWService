@@ -51,7 +51,7 @@
  * \verbatim
 room-<unique room ID>: {
 	description = This is my awesome room
-	is_private = true|false (private rooms don't appear when you do a 'list' request)
+	is_private = true|false (private rooms don't appear when you do a 'list' request, default=false)
 	secret = <optional password needed for manipulating (e.g. destroying) the room>
 	pin = <optional password needed for joining the room>
 	require_pvtid = true|false (whether subscriptions are required to provide a valid
@@ -59,6 +59,7 @@ room-<unique room ID>: {
 	publishers = <max number of concurrent senders> (e.g., 6 for a video
 				 conference or 1 for a webinar, default=3)
 	bitrate = <max video bitrate for senders> (e.g., 128000)
+	bitrate_cap = <true|false, whether the above cap should act as a limit to dynamic bitrate changes by publishers, default=false>,
 	fir_freq = <send a FIR to publishers every fir_freq seconds> (0=disable)
 	audiocodec = opus|g722|pcmu|pcma|isac32|isac16 (audio codec to force on publishers, default=opus
 				can be a comma separated list in order of preference, e.g., opus,pcmu)
@@ -70,7 +71,7 @@ room-<unique room ID>: {
 	video_svc = true|false (whether SVC support must be enabled; only works for VP9, default=false)
 	audiolevel_ext = true|false (whether the ssrc-audio-level RTP extension must be
 		negotiated/used or not for new publishers, default=true)
-	audiolevel_event = true|false (whether to emit event to other users or not)
+	audiolevel_event = true|false (whether to emit event to other users or not, default=false)
 	audio_active_packets = 100 (number of packets with audio level, default=100, 2 seconds)
 	audio_level_average = 25 (average value of audio level, 127=muted, 0='too loud', default=25)
 	videoorient_ext = true|false (whether the video-orientation RTP extension must be
@@ -692,12 +693,13 @@ room-<unique room ID>: {
 	"video_ssrc" : <video SSRC to use to use when streaming; optional>,
 	"video_pt" : <video payload type to use when streaming; optional>,
 	"video_rtcp_port" : <port to contact to receive video RTCP feedback from the recipient; optional>,
-	"video_port_2" : <if simulcasting, port to forward the video RTP packets from the second substream/layer to>,
-	"video_ssrc_2" : <if simulcasting, video SSRC to use to use the second substream/layer; optional>,
-	"video_pt_2" : <if simulcasting, video payload type to use the second substream/layer; optional>,
-	"video_port_3" : <if simulcasting, port to forward the video RTP packets from the third substream/layer to>,
-	"video_ssrc_3" : <if simulcasting, video SSRC to use to use the third substream/layer; optional>,
-	"video_pt_3" : <if simulcasting, video payload type to use the third substream/layer; optional>,
+	"simulcast" : <true|false, set to true if the source is simulcast and you want the forwarder to act as a regular viewer (single stream being forwarded) or false otherwise (substreams forwarded separately); optional, default=false>,
+	"video_port_2" : <if simulcasting and forwarding each substream, port to forward the video RTP packets from the second substream/layer to>,
+	"video_ssrc_2" : <if simulcasting and forwarding each substream, video SSRC to use to use the second substream/layer; optional>,
+	"video_pt_2" : <if simulcasting and forwarding each substream, video payload type to use the second substream/layer; optional>,
+	"video_port_3" : <if simulcasting and forwarding each substream, port to forward the video RTP packets from the third substream/layer to>,
+	"video_ssrc_3" : <if simulcasting and forwarding each substream, video SSRC to use to use the third substream/layer; optional>,
+	"video_pt_3" : <if simulcasting and forwarding each substream, video payload type to use the third substream/layer; optional>,
 	"data_port" : <port to forward the datachannel messages to>,
 	"srtp_suite" : <length of authentication tag (32 or 80); optional>,
 	"srtp_crypto" : "<key to use as crypto (base64 encoded key as in SDES); optional>"
@@ -708,6 +710,23 @@ room-<unique room ID>: {
  * property and extended it to RTP forwarding as well, you'll need to provide
  * it in the request as well or it will be rejected as unauthorized. By
  * default no limitation is posed on \c rtp_forward .
+ *
+ * It's worth spending some more words on how to forward simulcast publishers,
+ * as this can lead to some confusion. There are basically two ways to forward
+ * a simulcast publisher:
+ *
+ * -# you treat the forwarder as a regular viewer, which means you still only
+ * forward a single stream to the recipient, that is the highest quality
+ * available at any given time: you can do that by setting
+ * <code>simulcast: true</code> in the \c rtp_forward request;
+ * -# you forward each substream separately instead, to different target
+ * ports: you do that by specifying \c video_port_2 , \c video_port_3 and
+ * optionally the other related \c _2 and \c _3 properties; this is what
+ * you should use when you want to forward to a simulcast-aware Streaming
+ * mountpoint (see the \ref streaming for more details).
+ *
+ * The two approaches are mutually exclusive: you can NOT use them together
+ * in the same RTP forwarder.
  *
  * A successful request will result in an \c rtp_forward response, containing
  * the relevant info associated to the new forwarder(s):
@@ -1963,7 +1982,7 @@ static guint32 janus_videoroom_rtp_forwarder_add_helper(janus_videoroom_publishe
 			} else if(srtp_suite == 80) {
 				srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80(&(policy->rtp));
 			}
-			policy->ssrc.type = ssrc_any_inbound;
+			policy->ssrc.type = ssrc_any_outbound;
 			policy->key = decoded;
 			policy->next = NULL;
 			/* Create SRTP context */
@@ -5992,7 +6011,6 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 	janus_videoroom_session *session = (janus_videoroom_session *)session_data;
 	g_atomic_int_set(&session->started, 0);
 	if(!g_atomic_int_compare_and_exchange(&session->hangingup, 0, 1)) {
-		janus_mutex_unlock(&sessions_mutex);
 		return;
 	}
 	g_atomic_int_set(&session->dataready, 0);
@@ -6098,6 +6116,7 @@ static void *janus_videoroom_handler(void *data) {
 		}
 		janus_videoroom *videoroom = NULL;
 		janus_videoroom_publisher *participant = NULL;
+		janus_videoroom_subscriber *subscriber = NULL;
 		janus_mutex_lock(&sessions_mutex);
 		janus_videoroom_session *session = janus_videoroom_lookup_session(msg->handle);
 		if(!session) {
@@ -6111,11 +6130,32 @@ static void *janus_videoroom_handler(void *data) {
 			janus_videoroom_message_free(msg);
 			continue;
 		}
+		if(session->participant_type == janus_videoroom_p_type_subscriber) {
+			subscriber = (janus_videoroom_subscriber *)session->participant;
+			if(subscriber == NULL || g_atomic_int_get(&subscriber->destroyed)) {
+				janus_mutex_unlock(&sessions_mutex);
+				JANUS_LOG(LOG_ERR, "Invalid subscriber instance\n");
+				error_code = JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Invalid subscriber instance");
+				goto error;
+			}
+			if(subscriber->room == NULL) {
+				janus_mutex_unlock(&sessions_mutex);
+				JANUS_LOG(LOG_ERR, "No such room\n");
+				error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
+				g_snprintf(error_cause, 512, "No such room");
+				goto error;
+			}
+			janus_refcount_increase(&subscriber->ref);
+		}
 		janus_mutex_unlock(&sessions_mutex);
 		/* Handle request */
 		error_code = 0;
 		root = NULL;
 		if(msg->message == NULL) {
+			if(session->participant_type == janus_videoroom_p_type_subscriber) {
+				janus_refcount_decrease(&subscriber->ref);
+			}
 			JANUS_LOG(LOG_ERR, "No message??\n");
 			error_code = JANUS_VIDEOROOM_ERROR_NO_MESSAGE;
 			g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "%s", "No message??");
@@ -6126,8 +6166,12 @@ static void *janus_videoroom_handler(void *data) {
 		JANUS_VALIDATE_JSON_OBJECT(root, request_parameters,
 			error_code, error_cause, TRUE,
 			JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
-		if(error_code != 0)
+		if(error_code != 0) {
+			if(session->participant_type == janus_videoroom_p_type_subscriber) {
+				janus_refcount_decrease(&subscriber->ref);
+			}
 			goto error;
+		}
 		json_t *request = json_object_get(root, "request");
 		const char *request_text = json_string_value(request);
 		json_t *event = NULL;
@@ -6625,8 +6669,7 @@ static void *janus_videoroom_handler(void *data) {
 					if((!publisher->audio || !subscriber->audio_offered) &&
 							(!publisher->video || !subscriber->video_offered) &&
 							(!publisher->data || !subscriber->data_offered)) {
-						g_free(subscriber);
-						if (owner) {
+						if(owner) {
 							janus_refcount_decrease(&owner->session->ref);
 							janus_refcount_decrease(&owner->ref);
 						}
@@ -6637,6 +6680,7 @@ static void *janus_videoroom_handler(void *data) {
 						g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "Can't offer an SDP with no audio, video or data");
 						janus_mutex_unlock(&sessions_mutex);
 						janus_refcount_decrease(&subscriber->room->ref);
+						g_free(subscriber);
 						goto error;
 					}
 					subscriber->audio = audio ? json_is_true(audio) : TRUE;	/* True by default */
@@ -6689,8 +6733,7 @@ static void *janus_videoroom_handler(void *data) {
 					if(publisher->display)
 						json_object_set_new(event, "display", json_string(publisher->display));
 					if(legacy)
-						json_object_set_new(event, "warning", json_string("Deprecated use of 'listener' ptype, update to the new 'subscriber' ASAP"));
-					session->participant_type = janus_videoroom_p_type_subscriber;
+						json_object_set_new(event, "warning", json_string("Deprecated use of 'listener' ptype, update to the new 'subscriber' ASAP"));					
 					JANUS_LOG(LOG_VERB, "Preparing JSON event as a reply\n");
 					/* Negotiate by sending the selected publisher SDP back */
 					janus_mutex_lock(&publisher->subscribers_mutex);
@@ -7036,20 +7079,7 @@ static void *janus_videoroom_handler(void *data) {
 			janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 			/* Handle this subscriber */
-			janus_videoroom_subscriber *subscriber = (janus_videoroom_subscriber *)session->participant;
-			if(subscriber == NULL || g_atomic_int_get(&subscriber->destroyed)) {
-				JANUS_LOG(LOG_ERR, "Invalid subscriber instance\n");
-				error_code = JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR;
-				g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "Invalid subscriber instance");
-				goto error;
-			}
-			if(subscriber->room == NULL) {
-				JANUS_LOG(LOG_ERR, "No such room\n");
-				error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
-				g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "No such room");
-				goto error;
-			}
-			janus_refcount_increase(&subscriber->ref);
+	
 			if(!strcasecmp(request_text, "join")) {
 				JANUS_LOG(LOG_ERR, "Already in as a subscriber on this handle\n");
 				error_code = JANUS_VIDEOROOM_ERROR_ALREADY_JOINED;
