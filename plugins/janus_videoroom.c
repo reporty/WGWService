@@ -5366,7 +5366,7 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 
 /*CARBYNE-GST*/
 #define GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC 500000000 //0.5s
-
+#define GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC  5000000 //5s
 static int busCall(GstBus* bus, GstMessage* bus_msg, gpointer data) {
       GError *bus_err;
       gchar *bus_debug_info;
@@ -5459,6 +5459,7 @@ static janus_gstr * janus_gst_create_pipeline( janus_videocodec vcodec,
            }
        }
        g_object_set(gstr->wvsink, "location",rtspline, NULL);
+       g_object_set(gstr->wvsink, "tcp-timeout",GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, NULL);
        GstCaps * source_caps = NULL;
        if(vcodec == JANUS_VIDEOCODEC_VP8) {
            source_caps = gst_caps_new_simple ("application/x-rtp",
