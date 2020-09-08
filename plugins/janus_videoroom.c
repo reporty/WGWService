@@ -3111,7 +3111,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
                     json_t *vr_token = json_object_get(root, "roomtoken");
                     const char *vr_token_text = json_string_value(vr_token);
 
-                    JANUS_LOG(LOG_INFO, " create:plugin token:  %s\n", vr_token_text);
+                    JANUS_LOG(LOG_INFO, "publisher create:plugin token:  %s\n", vr_token_text);
                     if(FALSE ==  janus_auth_check_signature(vr_token_text,(const char *)room_id_str)) {
                        error_code = JANUS_VIDEOROOM_ERROR_UNAUTHORIZED;
                        g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "UNAUTHORIZED, mismatch token");
@@ -6254,7 +6254,7 @@ static void *janus_videoroom_handler(void *data) {
 
                                    json_t *vr_token = json_object_get(root, "roomtoken");
                                    const char *vr_token_text = json_string_value(vr_token);
-                                   JANUS_LOG(LOG_INFO, " join:plugin token:  %s\n", vr_token_text);
+                                   JANUS_LOG(LOG_INFO, "publisher join:plugin token:  %s\n", vr_token_text);
                                    if(FALSE ==  janus_auth_check_signature(vr_token_text,(const char *)videoroom->room_id_str)) {
                                       error_code = JANUS_VIDEOROOM_ERROR_UNAUTHORIZED;
                                       g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "UNAUTHORIZED, mismatch WGW  token");
@@ -6556,6 +6556,30 @@ static void *janus_videoroom_handler(void *data) {
 					janus_refcount_decrease(&videoroom->ref);
 					goto error;
 				}
+                                /*CARBYNE-AUT */
+                                /* A WGW token is nesseasry to join */
+                                if(auth_secret != NULL) {
+                                   JANUS_VALIDATE_JSON_OBJECT(root, wgw_token_auth_parameters,
+                                               error_code, error_cause, TRUE,
+                                   JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
+                                   if(error_code != 0) {
+                                      janus_mutex_unlock(&videoroom->mutex);
+                                      janus_refcount_decrease(&videoroom->ref);
+                                      goto error;
+                                   }
+
+                                   json_t *vr_token = json_object_get(root, "roomtoken");
+                                   const char *vr_token_text = json_string_value(vr_token);
+                                   JANUS_LOG(LOG_INFO, " subscriber join:plugin token:  %s\n", vr_token_text);
+                                   if(FALSE ==  janus_auth_check_signature(vr_token_text,(const char *)videoroom->room_id_str)) {
+                                      error_code = JANUS_VIDEOROOM_ERROR_UNAUTHORIZED;
+                                      g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "UNAUTHORIZED, mismatch WGW  token");
+                                      janus_mutex_unlock(&videoroom->mutex);
+                                      janus_refcount_decrease(&videoroom->ref);
+                                      goto error;
+                                  }
+                                }
+                                /*CARBYNE-AUT end */
 				janus_mutex_lock(&sessions_mutex);
 				session = janus_videoroom_lookup_session(msg->handle);
 				if(!session) {
