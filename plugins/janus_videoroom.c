@@ -51,7 +51,7 @@
  * \verbatim
 room-<unique room ID>: {
 	description = This is my awesome room
-	is_private = true|false (private rooms don't appear when you do a 'list' request)
+	is_private = true|false (private rooms don't appear when you do a 'list' request, default=false)
 	secret = <optional password needed for manipulating (e.g. destroying) the room>
 	pin = <optional password needed for joining the room>
 	require_pvtid = true|false (whether subscriptions are required to provide a valid
@@ -59,6 +59,7 @@ room-<unique room ID>: {
 	publishers = <max number of concurrent senders> (e.g., 6 for a video
 				 conference or 1 for a webinar, default=3)
 	bitrate = <max video bitrate for senders> (e.g., 128000)
+	bitrate_cap = <true|false, whether the above cap should act as a limit to dynamic bitrate changes by publishers, default=false>,
 	fir_freq = <send a FIR to publishers every fir_freq seconds> (0=disable)
 	audiocodec = opus|g722|pcmu|pcma|isac32|isac16 (audio codec to force on publishers, default=opus
 				can be a comma separated list in order of preference, e.g., opus,pcmu)
@@ -70,7 +71,7 @@ room-<unique room ID>: {
 	video_svc = true|false (whether SVC support must be enabled; only works for VP9, default=false)
 	audiolevel_ext = true|false (whether the ssrc-audio-level RTP extension must be
 		negotiated/used or not for new publishers, default=true)
-	audiolevel_event = true|false (whether to emit event to other users or not)
+	audiolevel_event = true|false (whether to emit event to other users or not, default=false)
 	audio_active_packets = 100 (number of packets with audio level, default=100, 2 seconds)
 	audio_level_average = 25 (average value of audio level, 127=muted, 0='too loud', default=25)
 	videoorient_ext = true|false (whether the video-orientation RTP extension must be
@@ -692,12 +693,13 @@ room-<unique room ID>: {
 	"video_ssrc" : <video SSRC to use to use when streaming; optional>,
 	"video_pt" : <video payload type to use when streaming; optional>,
 	"video_rtcp_port" : <port to contact to receive video RTCP feedback from the recipient; optional>,
-	"video_port_2" : <if simulcasting, port to forward the video RTP packets from the second substream/layer to>,
-	"video_ssrc_2" : <if simulcasting, video SSRC to use to use the second substream/layer; optional>,
-	"video_pt_2" : <if simulcasting, video payload type to use the second substream/layer; optional>,
-	"video_port_3" : <if simulcasting, port to forward the video RTP packets from the third substream/layer to>,
-	"video_ssrc_3" : <if simulcasting, video SSRC to use to use the third substream/layer; optional>,
-	"video_pt_3" : <if simulcasting, video payload type to use the third substream/layer; optional>,
+	"simulcast" : <true|false, set to true if the source is simulcast and you want the forwarder to act as a regular viewer (single stream being forwarded) or false otherwise (substreams forwarded separately); optional, default=false>,
+	"video_port_2" : <if simulcasting and forwarding each substream, port to forward the video RTP packets from the second substream/layer to>,
+	"video_ssrc_2" : <if simulcasting and forwarding each substream, video SSRC to use to use the second substream/layer; optional>,
+	"video_pt_2" : <if simulcasting and forwarding each substream, video payload type to use the second substream/layer; optional>,
+	"video_port_3" : <if simulcasting and forwarding each substream, port to forward the video RTP packets from the third substream/layer to>,
+	"video_ssrc_3" : <if simulcasting and forwarding each substream, video SSRC to use to use the third substream/layer; optional>,
+	"video_pt_3" : <if simulcasting and forwarding each substream, video payload type to use the third substream/layer; optional>,
 	"data_port" : <port to forward the datachannel messages to>,
 	"srtp_suite" : <length of authentication tag (32 or 80); optional>,
 	"srtp_crypto" : "<key to use as crypto (base64 encoded key as in SDES); optional>"
@@ -708,6 +710,23 @@ room-<unique room ID>: {
  * property and extended it to RTP forwarding as well, you'll need to provide
  * it in the request as well or it will be rejected as unauthorized. By
  * default no limitation is posed on \c rtp_forward .
+ *
+ * It's worth spending some more words on how to forward simulcast publishers,
+ * as this can lead to some confusion. There are basically two ways to forward
+ * a simulcast publisher:
+ *
+ * -# you treat the forwarder as a regular viewer, which means you still only
+ * forward a single stream to the recipient, that is the highest quality
+ * available at any given time: you can do that by setting
+ * <code>simulcast: true</code> in the \c rtp_forward request;
+ * -# you forward each substream separately instead, to different target
+ * ports: you do that by specifying \c video_port_2 , \c video_port_3 and
+ * optionally the other related \c _2 and \c _3 properties; this is what
+ * you should use when you want to forward to a simulcast-aware Streaming
+ * mountpoint (see the \ref streaming for more details).
+ *
+ * The two approaches are mutually exclusive: you can NOT use them together
+ * in the same RTP forwarder.
  *
  * A successful request will result in an \c rtp_forward response, containing
  * the relevant info associated to the new forwarder(s):
@@ -1482,6 +1501,7 @@ typedef struct janus_videoroom_session {
 	volatile gint hangingup;
 	volatile gint destroyed;
         volatile gint gstrun; /*CARBYNE-GST*/
+        volatile gint rtsprun; /*CARBYNE-GST*/
 	janus_mutex mutex;
 	janus_refcount ref;
        /*CARBYNE-GST*/
@@ -1489,6 +1509,7 @@ typedef struct janus_videoroom_session {
         gint video_pt;
         janus_gstr * gstr;
         gboolean is_gst;
+        unsigned int rtpforwardport;/*CARBYNE-GST*/
         //GAsyncQueue * vpackets;
         /*CARBYNE-GST end*/
 } janus_videoroom_session;
@@ -1846,6 +1867,7 @@ static void janus_videoroom_reqpli(janus_videoroom_publisher *publisher, const c
 	publisher->fir_latest = janus_get_monotonic_time();
 }
 
+static int busCall(GstBus* bus, GstMessage* bus_msg, gpointer data);
 /* Error codes */
 #define JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR		499
 #define JANUS_VIDEOROOM_ERROR_NO_MESSAGE		421
@@ -1960,7 +1982,7 @@ static guint32 janus_videoroom_rtp_forwarder_add_helper(janus_videoroom_publishe
 			} else if(srtp_suite == 80) {
 				srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80(&(policy->rtp));
 			}
-			policy->ssrc.type = ssrc_any_inbound;
+			policy->ssrc.type = ssrc_any_outbound;
 			policy->key = decoded;
 			policy->next = NULL;
 			/* Create SRTP context */
@@ -3089,7 +3111,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
                     json_t *vr_token = json_object_get(root, "roomtoken");
                     const char *vr_token_text = json_string_value(vr_token);
 
-                    JANUS_LOG(LOG_INFO, " create:plugin token:  %s\n", vr_token_text);
+                    JANUS_LOG(LOG_INFO, "publisher create:plugin token:  %s\n", vr_token_text);
                     if(FALSE ==  janus_auth_check_signature(vr_token_text,(const char *)room_id_str)) {
                        error_code = JANUS_VIDEOROOM_ERROR_UNAUTHORIZED;
                        g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "UNAUTHORIZED, mismatch token");
@@ -4882,7 +4904,6 @@ admin_response:
 
 #define JANUS_RTP_FORWARD_STRING_SIZE 256
 void janus_videoroom_setup_media(janus_plugin_session *handle) {
-	unsigned int rtpforwardport = 0; /*CARBYNE-RF*/
 	JANUS_LOG(LOG_INFO, "[%s-%p] WebRTC media is now available\n", JANUS_VIDEOROOM_PACKAGE, handle);
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
@@ -4941,8 +4962,8 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 				json_object_set_new(info, "id", string_ids ? json_string(participant->user_id_str) : json_integer(participant->user_id));
 				gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 			}
-                       /*CARBYNE-RF-start*/
-                       if(participant->udp_sock <= 0) {
+                        /*CARBYNE-RF-start*/
+                        if(participant->udp_sock <= 0) {
                            participant->udp_sock = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
                            int v6only = 0;
                            if(participant->udp_sock <= 0 ||
@@ -4950,10 +4971,10 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                                 JANUS_LOG(LOG_ERR, "Could not open UDP socket for RTP stream for publisher (%"SCNu64")\n",participant->user_id);
                                // goto prepare_response;
                            }
-                       }
-                         int fd = socket (AF_INET, SOCK_STREAM, 0);
-                         struct sockaddr_in sin;  // socket address structure specific to IPv4
-                         memset(&sin, 0, sizeof(sin));
+                        }
+                        int fd = socket (AF_INET, SOCK_STREAM, 0);
+                        struct sockaddr_in sin;  // socket address structure specific to IPv4
+                        memset(&sin, 0, sizeof(sin));
                          sin.sin_family = AF_INET;
                          sin.sin_addr.s_addr = inet_addr("127.0.0.1");
                          sin.sin_port = 0;    // 0 means the OS picks the port
@@ -4965,12 +4986,12 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                                 janus_refcount_decrease(&participant->ref);
                                 goto error;
                          }
-                         rtpforwardport = (unsigned int) ntohs(sin.sin_port);
+                         session->rtpforwardport = (unsigned int) ntohs(sin.sin_port);
 
                          JANUS_LOG(LOG_INFO, "CARBYNE::: janus_videoroom_setup_media ,,, create rtp-forward for PUBLISHER \n");
                          participant->room->video_rtp_forward_stream_id = janus_videoroom_rtp_forwarder_add_helper(participant, 
                                                                    "127.0.0.1",/* host*/
-                                                                   rtpforwardport,/* video_port[0],*/
+                                                                   session->rtpforwardport,/* video_port[0],*/
                                                                    -1,/* video_rtcp_port,*/
                                                                     0,/* video_pt[0],*/
                                                                     0,/* video_ssrc[0],*/
@@ -4994,117 +5015,18 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                          /*CARBYNE-RF-end*/
                          /*CARBYNE-GST*/
                          session->is_gst = TRUE;
-                         JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 1  --------------\n");
-                         if (session->is_gst) {
-                            JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 2 --------------\n");
-                            janus_gstr * gstr = (janus_gstr *)g_malloc0(sizeof(janus_gstr));
-                            if (gstr == NULL) {
-                               JANUS_LOG(LOG_FATAL,"Memory error..\n");
-                               close(fd);
-                               janus_refcount_decrease(&participant->ref);
-                               goto error;
-                            }
-                            if(participant->vcodec == JANUS_VIDEOCODEC_VP8) {
-                               JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------\n");
-                               gstr->wvsource = gst_element_factory_make ("udpsrc","udp_src");
-                               gstr->wvjitter = gst_element_factory_make ("rtpjitterbuffer","rtp_jitter_buffer");
-                               gstr->wvrtpdepay = gst_element_factory_make ("rtpvp8depay","rtp_vp8_depay");
-                               gstr->wvqueue = gst_element_factory_make ("queue","video_queue");
-                               gstr->wvsink = gst_element_factory_make ("rtspclientsink","rtsp_client_sink");
-                            } else if (participant->vcodec == JANUS_VIDEOCODEC_H264) {
-                               JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------\n");
-                               gstr->wvsource = gst_element_factory_make ("udpsrc","udp_src");
-                               gstr->wvrtpdepay = gst_element_factory_make ("rtph264depay","rtp_h264_depay");
-                               gstr->wvparse    = gst_element_factory_make ("h264parse","h264_parse");
-                               gstr->wvsink = gst_element_factory_make ("rtspclientsink","rtsp_client_sink");
-                            } else if (participant->vcodec == JANUS_VIDEOCODEC_VP9) {
-                               JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------\n");
-                            } else {
-                          }
-                          gstr->vfiltercaps = NULL;
-                          gstr->isvCapsSet = FALSE;
-                          gstr->pipeline = gst_pipeline_new("pipeline");
-			  char  udpline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
-                          g_snprintf(udpline,JANUS_RTP_FORWARD_STRING_SIZE, "udp://127.0.0.1:%d",rtpforwardport);
-                          g_object_set(gstr->wvsource, "uri", udpline, NULL);
-                          g_object_set(gstr->wvsink, "name", "sink", NULL);
-                          char  rtspline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
-                          if(rtsp_url != NULL) {
-                             if(!string_ids) {
-                                g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%s%"SCNu64"",rtsp_url,participant->room_id );
-                              } else {
-                                g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%s%s",rtsp_url,participant->room_id_str );
-                              }
-                          }
-                          g_object_set(gstr->wvsink, "location",rtspline, NULL);
-                          GstCaps * source_caps = NULL;
-                          if(participant->vcodec == JANUS_VIDEOCODEC_VP8) {
-                               source_caps = gst_caps_new_simple ("application/x-rtp",
-                                                      "media", G_TYPE_STRING, "video",
-                                                      "encoding-name", G_TYPE_STRING, "VP8",
-                                                       NULL);
-                            } else if (participant->vcodec == JANUS_VIDEOCODEC_H264) {
-				JANUS_LOG (LOG_INFO, "CARBYNE:::::JANUS_VIDEOCODEC_H264 profile:42e01f\n");
-                               source_caps = gst_caps_new_simple ("application/x-rtp",
-                                                      "media", G_TYPE_STRING, "video",
-						      "clock-rate",G_TYPE_INT,90000,
-                                                      "profile-level-id", G_TYPE_STRING,"42e01f",
-                                                      "encoding-name", G_TYPE_STRING, "H264",
-                                                       NULL);
-                            } else if (participant->vcodec == JANUS_VIDEOCODEC_VP9) {
-                               source_caps = gst_caps_new_simple ("application/x-rtp",
-                                                      "media", G_TYPE_STRING, "video",
-                                                      "encoding-name", G_TYPE_STRING, "VP9",
-                                                     NULL);
- 			  }else {
-				JANUS_LOG (LOG_ERR, "Unsupported codec !!!\n");
-				g_free (gstr);
-				close(fd);
-				janus_refcount_decrease(&participant->ref);
-				goto error;
-                          }
-			  GST_LOG ("caps are %" GST_PTR_FORMAT, source_caps);
-                          g_object_set (G_OBJECT (gstr->wvsource), "caps", source_caps, NULL);
-                          gst_caps_unref (source_caps);
-
-                          if(participant->vcodec == JANUS_VIDEOCODEC_VP8) {
-                          	gst_bin_add_many(GST_BIN(gstr->pipeline),gstr->wvsource,gstr->wvjitter,gstr->wvrtpdepay,gstr->wvqueue,gstr->wvsink,NULL);
-                            	if (gst_element_link_many (gstr->wvsource,gstr->wvjitter,gstr->wvrtpdepay,gstr->wvqueue,gstr->wvsink,  NULL) != TRUE) {
-                                                     JANUS_LOG (LOG_ERR, "Failed to link GSTREAMER elements in gstr!!!\n");
-                               		gst_object_unref (GST_OBJECT(gstr->pipeline));
-                               		g_free (gstr);
-			       		close(fd);
-                               		janus_refcount_decrease(&participant->ref);
-                               		goto error;
-                            	}
-			  } else if (participant->vcodec == JANUS_VIDEOCODEC_H264) {
-				gst_bin_add_many(GST_BIN(gstr->pipeline),gstr->wvsource,gstr->wvrtpdepay,gstr->wvparse,gstr->wvsink,NULL);
-				if (gst_element_link_many (gstr->wvsource,gstr->wvrtpdepay,gstr->wvparse,gstr->wvsink,  NULL) != TRUE) {
-                                	JANUS_LOG (LOG_ERR, "Failed to link GSTREAMER elements in gstr!!!\n");
-                               		gst_object_unref (GST_OBJECT(gstr->pipeline));
-                               		g_free (gstr);
-                               		close(fd);
-                               		janus_refcount_decrease(&participant->ref);
-                               		goto error;
-                            	}
-                         }
-                         gstr->bus = gst_pipeline_get_bus (GST_PIPELINE (gstr->pipeline));
-                         session->gstr = gstr;
                          GError * error = NULL;
                          g_thread_try_new ("gst", &janus_gst_gst_thread, session, &error);
                          if (error != NULL) {
                          	JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer gstr thread...\n", error->code, error->message ? error->message : "??");
-                         	gst_object_unref (GST_OBJECT(gstr->pipeline));
-                         	g_free (gstr);
 				close(fd);
                          	janus_refcount_decrease(&participant->ref);
                          	goto error;
                         }
-                }
-                janus_videoroom_reqpli(participant, "New rtp_forward engaged");
-                /*CARBYNE-GST-end*/
-                close(fd); /*CARBYNE-RF*/
-	        janus_refcount_decrease(&participant->ref);
+                        janus_videoroom_reqpli(participant, "New rtp_forward engaged");
+                        /*CARBYNE-GST-end*/
+                        close(fd); /*CARBYNE-RF*/
+	                janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 			janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)session->participant;
 			if(s && s->feed) {
@@ -5443,66 +5365,262 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 }
 
 /*CARBYNE-GST*/
-#define GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC 500000000
+#define GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC 500000000 //0.5s
+#define GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC  5000000 //5s
+static int busCall(GstBus* bus, GstMessage* bus_msg, gpointer data) {
+      GError *bus_err;
+      gchar *bus_debug_info;
+      janus_videoroom_session * session = (janus_videoroom_session *) data;
+      if (session == NULL) {
+         JANUS_LOG (LOG_ERR, "invalid session!\n");
+         return TRUE;
+      }
+      if (bus_msg != NULL) {
+          switch (GST_MESSAGE_TYPE (bus_msg)) {
+             case GST_MESSAGE_ERROR:
+                gst_message_parse_error (bus_msg, &bus_err, &bus_debug_info);
+                JANUS_LOG (LOG_ERR, "CARBYNE:: Got GST BUS  error received from element %s: %d (%s) ...\n",GST_OBJECT_NAME (bus_msg->src), bus_err->code, bus_err->message ? bus_err->message : "??");
+                JANUS_LOG (LOG_ERR, "CARBYNE:: GST BUS Debugging information: %s\n", bus_debug_info ? bus_debug_info : "none");
+                g_clear_error (&bus_err);
+                g_free (bus_debug_info);
+                g_atomic_int_set(&session->rtsprun,0);
+             break;
+             case GST_MESSAGE_EOS:
+               JANUS_LOG (LOG_VERB,"CARBYNE:: GST BUS End-Of-Stream reached.\n");
+               break;
+             case GST_MESSAGE_STATE_CHANGED: {
+               GstState oldState;
+               GstState newState;
+               GstState pending;
+               gst_message_parse_state_changed(bus_msg, &oldState, &newState, &pending);
+               switch (newState)
+               {
+                  case GST_STATE_VOID_PENDING:
+                  case GST_STATE_NULL:
+                  case GST_STATE_READY:
+                  case GST_STATE_PAUSED:
+                  case GST_STATE_PLAYING:
+                  JANUS_LOG (LOG_VERB,"CARBYNE::GST new state %d\n",newState);
+                    break;
+                  default:
+                     break;
+               }
+               break;
+             }
+             default:
+                JANUS_LOG (LOG_VERB,"CARBYNE::GST BUS Unexpected message received.\n");
+             break;
+          }
+     }
+     return TRUE;
+}
+
+static janus_gstr * janus_gst_create_pipeline( janus_videocodec vcodec,
+                                               const char * room_id_str, 
+                                               guint64 room_id,
+                                               unsigned int rtpforwardport) {
+
+         janus_gstr *gstr = (janus_gstr *)g_malloc0(sizeof(janus_gstr));
+         if (gstr == NULL) {
+               JANUS_LOG(LOG_FATAL,"Memory error..\n");
+            return NULL;
+         }
+        JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 2 --------------\n");
+        if(vcodec == JANUS_VIDEOCODEC_VP8) {
+            JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------\n");
+            gstr->wvsource = gst_element_factory_make ("udpsrc","udp_src");
+            gstr->wvjitter = gst_element_factory_make ("rtpjitterbuffer","rtp_jitter_buffer");
+            gstr->wvrtpdepay = gst_element_factory_make ("rtpvp8depay","rtp_vp8_depay");
+            gstr->wvqueue = gst_element_factory_make ("queue","video_queue");
+            gstr->wvsink = gst_element_factory_make ("rtspclientsink","rtsp_client_sink");
+       } else if (vcodec == JANUS_VIDEOCODEC_H264) {
+            JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------\n");
+            gstr->wvsource = gst_element_factory_make ("udpsrc","udp_src");
+            gstr->wvrtpdepay = gst_element_factory_make ("rtph264depay","rtp_h264_depay");
+            gstr->wvparse    = gst_element_factory_make ("h264parse","h264_parse");
+            gstr->wvsink = gst_element_factory_make ("rtspclientsink","rtsp_client_sink");
+       } else if (vcodec == JANUS_VIDEOCODEC_VP9) {
+            JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------\n");
+       } else {
+         }
+       gstr->vfiltercaps = NULL;
+       gstr->isvCapsSet = FALSE;
+       gstr->pipeline = gst_pipeline_new("pipeline");
+       char  udpline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
+       g_snprintf(udpline,JANUS_RTP_FORWARD_STRING_SIZE, "udp://127.0.0.1:%d",rtpforwardport);
+       g_object_set(gstr->wvsource, "uri", udpline, NULL);
+       g_object_set(gstr->wvsink, "name", "sink", NULL);
+       char  rtspline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
+       if(rtsp_url != NULL) {
+           if(!string_ids) {
+               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%s%"SCNu64"", rtsp_url, room_id );
+           } else {
+               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%s%s", rtsp_url, room_id_str );
+           }
+       }
+       g_object_set(gstr->wvsink, "location",rtspline, NULL);
+       g_object_set(gstr->wvsink, "tcp-timeout",GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, NULL);
+       GstCaps * source_caps = NULL;
+       if(vcodec == JANUS_VIDEOCODEC_VP8) {
+           source_caps = gst_caps_new_simple ("application/x-rtp",
+                                              "media", G_TYPE_STRING, "video",
+                                              "encoding-name", G_TYPE_STRING, "VP8",
+                                              NULL);
+       } else if (vcodec == JANUS_VIDEOCODEC_H264) {
+           JANUS_LOG (LOG_INFO, "CARBYNE:::::JANUS_VIDEOCODEC_H264 profile:42e01f\n");
+           source_caps = gst_caps_new_simple ("application/x-rtp",
+                                              "media", G_TYPE_STRING, "video",
+                                              "clock-rate",G_TYPE_INT,90000,
+                                              "profile-level-id", G_TYPE_STRING,"42e01f",
+                                              "encoding-name", G_TYPE_STRING, "H264",
+                                              NULL);
+       } else if (vcodec == JANUS_VIDEOCODEC_VP9) {
+           source_caps = gst_caps_new_simple ("application/x-rtp",
+                                              "media", G_TYPE_STRING, "video",
+                                              "encoding-name", G_TYPE_STRING, "VP9",
+                                              NULL);
+       } else {
+           JANUS_LOG (LOG_ERR, "Unsupported codec !!!\n");
+           g_free (gstr);
+           return NULL;
+       }
+       GST_LOG ("caps are %" GST_PTR_FORMAT, source_caps);
+       g_object_set (G_OBJECT (gstr->wvsource), "caps", source_caps, NULL);
+       gst_caps_unref (source_caps);
+
+       if(vcodec == JANUS_VIDEOCODEC_VP8) {
+           gst_bin_add_many(GST_BIN(gstr->pipeline),gstr->wvsource,gstr->wvjitter,gstr->wvrtpdepay,
+                           gstr->wvqueue,gstr->wvsink,NULL);
+           if (gst_element_link_many (gstr->wvsource,gstr->wvjitter,gstr->wvrtpdepay,gstr->wvqueue,gstr->wvsink,  NULL) != TRUE) {
+               JANUS_LOG (LOG_ERR, "Failed to link GSTREAMER elements in gstr!!!\n");
+               gst_object_unref (GST_OBJECT(gstr->pipeline));
+               g_free (gstr);
+               return NULL;
+           }
+       } else if (vcodec == JANUS_VIDEOCODEC_H264) {
+           gst_bin_add_many(GST_BIN(gstr->pipeline),gstr->wvsource,gstr->wvrtpdepay,gstr->wvparse,gstr->wvsink,NULL);
+           if (gst_element_link_many (gstr->wvsource,gstr->wvrtpdepay,gstr->wvparse,gstr->wvsink,  NULL) != TRUE) {
+               JANUS_LOG (LOG_ERR, "Failed to link GSTREAMER elements in gstr!!!\n");
+               gst_object_unref (GST_OBJECT(gstr->pipeline));
+               g_free (gstr);
+               return NULL;
+           }
+       }
+       return gstr;
+}
 
 static void * janus_gst_gst_thread (void * data) {
     JANUS_LOG (LOG_INFO, "---------------START GST THREAD --------------\n");
     janus_videoroom_session * session = (janus_videoroom_session *) data;
     if (session == NULL) {
-        JANUS_LOG (LOG_ERR, "invalid session!\n");
-        g_thread_unref (g_thread_self());
-        return NULL; 
-    }
-    if (session->gstr == NULL) {
-        JANUS_LOG (LOG_ERR, "Invalid gstreamer pipeline..\n");
+         JANUS_LOG (LOG_ERR, "invalid session!\n");
         g_thread_unref (g_thread_self());
         return NULL;
     }
-    janus_gstr * player = session->gstr;
-    gst_element_set_state (player->pipeline, GST_STATE_PLAYING);
-    if (gst_element_get_state (player->pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
-        JANUS_LOG (LOG_ERR, "Unable to play pipeline..!\n");
-        g_thread_unref (g_thread_self());
-        return NULL;
-    }
+   janus_refcount_increase(&session->ref);
+   janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
 
-    GError * error = NULL;
-    g_thread_try_new ("playout", &janus_gst_relay_thread, session, &error);
-    if (error != NULL) {
-        JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer relay thread...\n", error->code, error->message ? error->message : "??");
-        gst_object_unref (GST_OBJECT(player->pipeline));
-        g_free (player);
-        g_thread_unref (g_thread_self());
-        return NULL;
-    }
-    JANUS_LOG (LOG_INFO, "---------------START GST THREAD WHILE --------------\n");
-    JANUS_LOG (LOG_INFO, "Joining gstr thread..\n");
+    JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 1  --------------\n");
+    if (session->is_gst) {
+       janus_gstr * gstr;
+       do {
+           gstr = janus_gst_create_pipeline(publisher->vcodec, publisher->room_id_str, publisher->room_id, session->rtpforwardport);
+           if(gstr != NULL)
+           {
+              gstr->bus = gst_pipeline_get_bus (GST_PIPELINE (gstr->pipeline));
+              gst_bus_add_watch (gstr->bus, busCall, session);
+              session->gstr = gstr;
+            }
+            else {
+               JANUS_LOG (LOG_ERR, "Invalid gstreamer pipeline..\n");
+               g_thread_unref (g_thread_self());
+	       janus_refcount_decrease(&session->ref);
+               goto error;
+           }
 
-    janus_refcount_increase(&session->ref);
-    g_atomic_int_set(&session->gstrun, 1);
-    while (!g_atomic_int_get (&stopping) && 
-	    g_atomic_int_get(&initialized) && 
-            !g_atomic_int_get(&session->hangingup) &&
-            g_atomic_int_get(&session->gstrun)) {
-	usleep(50000); //0.05s
-    }
-    usleep(500000); //0.5s
+           gst_element_set_state (gstr->pipeline, GST_STATE_PLAYING);
+           if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
+               JANUS_LOG (LOG_ERR, "Unable to play pipeline..!\n");
+               gst_object_unref (GST_OBJECT(gstr->pipeline));
+               g_free (gstr);
+               session->gstr = NULL;
+               g_thread_unref (g_thread_self());
+               janus_refcount_decrease(&session->ref);
+               return NULL;
+           }
+           GError * error = NULL;
+           g_thread_try_new ("playout", &janus_gst_relay_thread, session, &error);
+           if (error != NULL) {
+               JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer relay thread...\n", error->code,
+                                    error->message ? error->message : "??");
+               gst_object_unref (GST_OBJECT(gstr->pipeline));
+               g_free (gstr);
+               session->gstr = NULL;
+               g_thread_unref (g_thread_self());
+               janus_refcount_decrease(&session->ref);
+               return NULL;
+           }
 
-    JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --------------\n");
-    gst_object_unref (player->bus);
-    gst_element_set_state (player->pipeline, GST_STATE_NULL);
-    if (gst_element_get_state (player->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
-        JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER gstr pipelline..!!\n");
-    }
-    gst_object_unref (GST_OBJECT(player->pipeline));
-    g_free (player);
-    session->gstr = NULL;
+           JANUS_LOG (LOG_INFO, "---------------START GST THREAD WHILE --------------\n");
+           JANUS_LOG (LOG_INFO, "Joining gstr thread..\n");
 
+           g_atomic_int_set(&session->gstrun, 1);
+           g_atomic_int_set(&session->rtsprun,1);
+
+           while (!g_atomic_int_get (&stopping) &&
+                   g_atomic_int_get(&initialized) &&
+                  !g_atomic_int_get(&session->hangingup) &&
+                   g_atomic_int_get(&session->gstrun) &&
+                   g_atomic_int_get(&session->rtsprun)) {
+                   usleep(5000000); //0.05s
+          }
+          usleep(100000); //0.1s
+
+          JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --------------\n");
+          gst_object_unref (gstr->bus);
+          gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
+          if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
+              JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER gstr pipelline..!!\n");
+          }
+          gst_object_unref (GST_OBJECT(gstr->pipeline));
+          g_free (gstr);
+          session->gstr = NULL;
+
+          if(g_atomic_int_get(&session->gstrun)) {
+             JANUS_LOG (LOG_INFO, "---------------RESTART  GST THREAD RECONNECT LOOP --------------\n");
+          }
+	  else {
+            JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD RECONNECT LOOP --------------\n");
+            break; 
+          }
+       } while(1);
+    }
     JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD  --------------\n");
     JANUS_LOG (LOG_INFO, "Leaving gstr pipeline thread..\n");
     g_thread_unref (g_thread_self());
     janus_refcount_decrease(&session->ref);
     return NULL;
+error:
+    {
+       /*CARBYNE-GST Prepare JSON error event */
+       json_t *event = json_object();
+       if(event!=NULL) {
+          char error_cause[JANUS_ERROR_CAUSE_STRING_SIZE] = {0};
+          g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "%s", "GST mailfunction");
+          json_object_set_new(event, "videoroom", json_string("event"));
+          json_object_set_new(event, "error_code", json_integer(JANUS_VIDEOROOM_ERROR_NO_MESSAGE));
+          json_object_set_new(event, "error", json_string(error_cause));
+          int ret = gateway->push_event(session->handle, &janus_videoroom_plugin, NULL, event, NULL);
+          JANUS_LOG(LOG_WARN, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+          json_decref(event);
+      }
+      if(session) {
+         /* close incoming media, session  and  peer connection */
+         janus_videoroom_hangup_media(session->handle);
+         gateway->close_pc(session->handle);
+      }
+   }
+   return NULL; 
 }
 /*CARBYNE-GST-end*/
 
@@ -5894,7 +6012,6 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 	janus_videoroom_session *session = (janus_videoroom_session *)session_data;
 	g_atomic_int_set(&session->started, 0);
 	if(!g_atomic_int_compare_and_exchange(&session->hangingup, 0, 1)) {
-		janus_mutex_unlock(&sessions_mutex);
 		return;
 	}
 	g_atomic_int_set(&session->dataready, 0);
@@ -6000,6 +6117,7 @@ static void *janus_videoroom_handler(void *data) {
 		}
 		janus_videoroom *videoroom = NULL;
 		janus_videoroom_publisher *participant = NULL;
+		janus_videoroom_subscriber *subscriber = NULL;
 		janus_mutex_lock(&sessions_mutex);
 		janus_videoroom_session *session = janus_videoroom_lookup_session(msg->handle);
 		if(!session) {
@@ -6013,11 +6131,32 @@ static void *janus_videoroom_handler(void *data) {
 			janus_videoroom_message_free(msg);
 			continue;
 		}
+		if(session->participant_type == janus_videoroom_p_type_subscriber) {
+			subscriber = (janus_videoroom_subscriber *)session->participant;
+			if(subscriber == NULL || g_atomic_int_get(&subscriber->destroyed)) {
+				janus_mutex_unlock(&sessions_mutex);
+				JANUS_LOG(LOG_ERR, "Invalid subscriber instance\n");
+				error_code = JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Invalid subscriber instance");
+				goto error;
+			}
+			if(subscriber->room == NULL) {
+				janus_mutex_unlock(&sessions_mutex);
+				JANUS_LOG(LOG_ERR, "No such room\n");
+				error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
+				g_snprintf(error_cause, 512, "No such room");
+				goto error;
+			}
+			janus_refcount_increase(&subscriber->ref);
+		}
 		janus_mutex_unlock(&sessions_mutex);
 		/* Handle request */
 		error_code = 0;
 		root = NULL;
 		if(msg->message == NULL) {
+			if(session->participant_type == janus_videoroom_p_type_subscriber) {
+				janus_refcount_decrease(&subscriber->ref);
+			}
 			JANUS_LOG(LOG_ERR, "No message??\n");
 			error_code = JANUS_VIDEOROOM_ERROR_NO_MESSAGE;
 			g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "%s", "No message??");
@@ -6028,8 +6167,12 @@ static void *janus_videoroom_handler(void *data) {
 		JANUS_VALIDATE_JSON_OBJECT(root, request_parameters,
 			error_code, error_cause, TRUE,
 			JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
-		if(error_code != 0)
+		if(error_code != 0) {
+			if(session->participant_type == janus_videoroom_p_type_subscriber) {
+				janus_refcount_decrease(&subscriber->ref);
+			}
 			goto error;
+		}
 		json_t *request = json_object_get(root, "request");
 		const char *request_text = json_string_value(request);
 		json_t *event = NULL;
@@ -6062,7 +6205,39 @@ static void *janus_videoroom_handler(void *data) {
 				JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
 			if(error_code != 0)
 				goto error;
-			janus_mutex_lock(&rooms_mutex);
+
+                        /*CARBYNE-AUT */
+                        /* A WGW token is nesseasry to join */
+                        if(auth_secret != NULL) {
+                           json_t *room = json_object_get(root, "room");
+                           guint64 room_id = 0;
+                           char room_id_num[30], *room_id_str = NULL;
+                           if(!string_ids) {
+                              room_id = json_integer_value(room);
+                              g_snprintf(room_id_num, sizeof(room_id_num), "%"SCNu64, room_id);
+                              room_id_str = room_id_num;
+                           } else {
+                              room_id_str = (char *)json_string_value(room);
+                           }
+                           JANUS_VALIDATE_JSON_OBJECT(root, wgw_token_auth_parameters,
+                           error_code, error_cause, TRUE,
+                           JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
+                           if(error_code != 0) {
+                              goto error;
+                           }
+
+                           json_t *vr_token = json_object_get(root, "roomtoken");
+                           const char *vr_token_text = json_string_value(vr_token);
+                           JANUS_LOG(LOG_INFO, "join:plugin token:  %s\n", vr_token_text);
+                           if(FALSE ==  janus_auth_check_signature(vr_token_text,(const char *)room_id_str)) {
+                              error_code = JANUS_VIDEOROOM_ERROR_UNAUTHORIZED;
+                              g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "UNAUTHORIZED, mismatch WGW  token");
+                              goto error;
+                           }
+                        }
+                        /*CARBYNE-AUT end */
+
+ 	  	        janus_mutex_lock(&rooms_mutex);
 			error_code = janus_videoroom_access_room(root, FALSE, TRUE, &videoroom, error_cause, sizeof(error_cause));
 			if(error_code != 0) {
 				janus_mutex_unlock(&rooms_mutex);
@@ -6097,30 +6272,6 @@ static void *janus_videoroom_handler(void *data) {
 					janus_refcount_decrease(&videoroom->ref);
 					goto error;
 				}
-                                /*CARBYNE-AUT */
-                                /* A WGW token is nesseasry to join */
-                                if(auth_secret != NULL) {
-                                   JANUS_VALIDATE_JSON_OBJECT(root, wgw_token_auth_parameters,
-                                               error_code, error_cause, TRUE,
-                                   JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
-                                   if(error_code != 0) {
-                                      janus_mutex_unlock(&videoroom->mutex);
-                                      janus_refcount_decrease(&videoroom->ref);
-                                      goto error;
-                                   }
-
-                                   json_t *vr_token = json_object_get(root, "roomtoken");
-                                   const char *vr_token_text = json_string_value(vr_token);
-                                   JANUS_LOG(LOG_INFO, " join:plugin token:  %s\n", vr_token_text);
-                                   if(FALSE ==  janus_auth_check_signature(vr_token_text,(const char *)videoroom->room_id_str)) {
-                                      error_code = JANUS_VIDEOROOM_ERROR_UNAUTHORIZED;
-                                      g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "UNAUTHORIZED, mismatch WGW  token");
-                                      janus_mutex_unlock(&videoroom->mutex);
-                                      janus_refcount_decrease(&videoroom->ref);
-                                      goto error;
-                                  }
-                                }
-                                /*CARBYNE-AUT end */
 
 				/* A token might be required to join */
 				if(videoroom->check_allowed) {
@@ -6413,6 +6564,7 @@ static void *janus_videoroom_handler(void *data) {
 					janus_refcount_decrease(&videoroom->ref);
 					goto error;
 				}
+
 				janus_mutex_lock(&sessions_mutex);
 				session = janus_videoroom_lookup_session(msg->handle);
 				if(!session) {
@@ -6527,8 +6679,7 @@ static void *janus_videoroom_handler(void *data) {
 					if((!publisher->audio || !subscriber->audio_offered) &&
 							(!publisher->video || !subscriber->video_offered) &&
 							(!publisher->data || !subscriber->data_offered)) {
-						g_free(subscriber);
-						if (owner) {
+						if(owner) {
 							janus_refcount_decrease(&owner->session->ref);
 							janus_refcount_decrease(&owner->ref);
 						}
@@ -6539,6 +6690,7 @@ static void *janus_videoroom_handler(void *data) {
 						g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "Can't offer an SDP with no audio, video or data");
 						janus_mutex_unlock(&sessions_mutex);
 						janus_refcount_decrease(&subscriber->room->ref);
+						g_free(subscriber);
 						goto error;
 					}
 					subscriber->audio = audio ? json_is_true(audio) : TRUE;	/* True by default */
@@ -6591,8 +6743,7 @@ static void *janus_videoroom_handler(void *data) {
 					if(publisher->display)
 						json_object_set_new(event, "display", json_string(publisher->display));
 					if(legacy)
-						json_object_set_new(event, "warning", json_string("Deprecated use of 'listener' ptype, update to the new 'subscriber' ASAP"));
-					session->participant_type = janus_videoroom_p_type_subscriber;
+						json_object_set_new(event, "warning", json_string("Deprecated use of 'listener' ptype, update to the new 'subscriber' ASAP"));					
 					JANUS_LOG(LOG_VERB, "Preparing JSON event as a reply\n");
 					/* Negotiate by sending the selected publisher SDP back */
 					janus_mutex_lock(&publisher->subscribers_mutex);
@@ -6938,20 +7089,7 @@ static void *janus_videoroom_handler(void *data) {
 			janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 			/* Handle this subscriber */
-			janus_videoroom_subscriber *subscriber = (janus_videoroom_subscriber *)session->participant;
-			if(subscriber == NULL || g_atomic_int_get(&subscriber->destroyed)) {
-				JANUS_LOG(LOG_ERR, "Invalid subscriber instance\n");
-				error_code = JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR;
-				g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "Invalid subscriber instance");
-				goto error;
-			}
-			if(subscriber->room == NULL) {
-				JANUS_LOG(LOG_ERR, "No such room\n");
-				error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
-				g_snprintf(error_cause, JANUS_ERROR_CAUSE_STRING_SIZE, "No such room");
-				goto error;
-			}
-			janus_refcount_increase(&subscriber->ref);
+	
 			if(!strcasecmp(request_text, "join")) {
 				JANUS_LOG(LOG_ERR, "Already in as a subscriber on this handle\n");
 				error_code = JANUS_VIDEOROOM_ERROR_ALREADY_JOINED;
