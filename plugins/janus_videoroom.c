@@ -4963,6 +4963,18 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 				gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 			}
                         /*CARBYNE-RF-start*/
+
+                        JANUS_LOG(LOG_WARN, "Publisher: audio %d, video %d,   \n",participant->audio, participant->video);
+                        JANUS_LOG(LOG_WARN, "Publisher: audio_pt %u, video_pt %u,   \n",participant->audio_pt, participant->video_pt);
+                        /*******************************************/
+			janus_refcount_decrease(&participant->ref);
+                        goto quit;
+                        /*******************************************/
+                        if(participant->audio && ! participant->video){
+				janus_refcount_decrease(&participant->ref);
+                                goto quit;
+                        }
+
                         if(participant->udp_sock <= 0) {
                            participant->udp_sock = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
                            int v6only = 0;
@@ -5045,6 +5057,7 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			}
 		}
 	}
+quit:
 	janus_refcount_decrease(&session->ref);
         return;
 error:
@@ -5480,7 +5493,7 @@ static janus_gstr * janus_gst_create_pipeline( janus_videocodec vcodec,
                                               "encoding-name", G_TYPE_STRING, "VP9",
                                               NULL);
        } else {
-           JANUS_LOG (LOG_ERR, "Unsupported codec !!!\n");
+           JANUS_LOG (LOG_ERR, "Unsupported codec %d !!!\n", vcodec);
            g_free (gstr);
            return NULL;
        }
