@@ -4967,8 +4967,6 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                         JANUS_LOG(LOG_WARN, "Publisher: audio %d, video %d,   \n",participant->audio, participant->video);
                         JANUS_LOG(LOG_WARN, "Publisher: audio_pt %u, video_pt %u,   \n",participant->audio_pt, participant->video_pt);
                         /*******************************************/
-			janus_refcount_decrease(&participant->ref);
-                        goto quit;
                         /*******************************************/
                         if(participant->audio && ! participant->video){
 				janus_refcount_decrease(&participant->ref);
