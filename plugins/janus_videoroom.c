@@ -1513,6 +1513,7 @@ typedef struct janus_videoroom_session {
         janus_gstr * gstrAudio;
         janus_gstr * gstrVideo;
         gboolean is_gst;
+	gboolean is_ingress; /* is Caller */
         unsigned int audio_rtpforwardport;/*CARBYNE-GST*/
         unsigned int video_rtpforwardport;/*CARBYNE-GST*/
         //GAsyncQueue * vpackets;
@@ -5088,10 +5089,12 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                         /*******************************************/
                         if(participant->audio && ! participant->video){
 				JANUS_LOG(LOG_WARN, "[%s-%p]AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
+				session->is_ingress = FALSE;
                         }
 			else 
 			{
 				JANUS_LOG(LOG_WARN, "[%s-%p]VIDEO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
+				session->is_ingress = TRUE;
 			}
 
 			if(!forward_media(session, (participant->audio && ! participant->video) )){
@@ -5117,7 +5120,6 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			}
 		}
 	}
-quit:
 	janus_refcount_decrease(&session->ref);
         return;
 error:
@@ -5508,7 +5510,8 @@ static int busCallVideo(GstBus* bus, GstMessage* bus_msg, gpointer data) {
 static janus_gstr * janus_gst_create_pipeline_audio( janus_audiocodec acodec,
                                                const char * room_id_str,
                                                guint64 room_id,
-                                               unsigned int rtpforwardport) {
+                                               unsigned int rtpforwardport,
+                                               gboolean is_ingress) {
 
          janus_gstr *gstr = (janus_gstr *)g_malloc0(sizeof(janus_gstr));
          if (gstr == NULL) {
@@ -5534,9 +5537,9 @@ static janus_gstr * janus_gst_create_pipeline_audio( janus_audiocodec acodec,
        char  rtspline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
        if(rtsp_url != NULL) {
            if(!string_ids) {
-               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%sAUDIO_%"SCNu64"", rtsp_url, room_id );
+               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%s%s_AUDIO_%"SCNu64"",rtsp_url, is_ingress?"INGRESS":"EGRESS", room_id );
            } else {
-               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%sAUDIO_%s", rtsp_url, room_id_str );
+               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%s%s_AUDIO_%s", rtsp_url, is_ingress?"INGRESS":"EGRESS", room_id_str );
            }
        }
        g_object_set(gstr->wvsink, "location",rtspline, NULL);
@@ -5678,7 +5681,7 @@ static void * janus_gst_gst_thread_audio (void * data) {
     if (session->is_gst) {
        janus_gstr * gstr;
        do {
-           gstr = janus_gst_create_pipeline_audio(publisher->vcodec, publisher->room_id_str, publisher->room_id, session->audio_rtpforwardport);
+           gstr = janus_gst_create_pipeline_audio(publisher->vcodec, publisher->room_id_str, publisher->room_id, session->audio_rtpforwardport, session->is_ingress);
            if(gstr != NULL)
            {
               gstr->bus = gst_pipeline_get_bus (GST_PIPELINE (gstr->pipeline));
@@ -5786,10 +5789,11 @@ static void * janus_gst_gst_thread_video (void * data) {
         g_thread_unref (g_thread_self());
         return NULL;
     }
-   janus_refcount_increase(&session->ref);
-   janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
-
-    JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST VIDEO 1  --------------\n");
+    janus_refcount_increase(&session->ref);
+    janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
+    unsigned int video_rtpforwardport = session->video_rtpforwardport;
+    JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST VIDEO 1  --%s:%d:%d\n",
+			publisher->room_id_str,video_rtpforwardport,session->video_rtpforwardport);
     if (session->is_gst) {
        janus_gstr * gstr;
        do {
@@ -5830,7 +5834,8 @@ static void * janus_gst_gst_thread_video (void * data) {
                return NULL;
            }
 
-           JANUS_LOG (LOG_INFO, "---------------START GST VIDEO THREAD WHILE --------------\n");
+           JANUS_LOG (LOG_INFO, "---------------START GST VIDEO THREAD WHILE -%s:%d:%d\n",
+				publisher->room_id_str,video_rtpforwardport,session->video_rtpforwardport);
            JANUS_LOG (LOG_INFO, "Joining gstr video thread..\n");
 
            g_atomic_int_set(&session->gstrunVideo, 1);
@@ -5845,7 +5850,8 @@ static void * janus_gst_gst_thread_video (void * data) {
           }
           usleep(100000); //0.1s
 
-          JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --------------\n");
+          JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE --%s:%d:%d\n",
+				publisher->room_id_str,video_rtpforwardport,session->video_rtpforwardport);
           gst_object_unref (gstr->bus);
           gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
           if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
@@ -5856,15 +5862,18 @@ static void * janus_gst_gst_thread_video (void * data) {
           session->gstrVideo = NULL;
 
           if(g_atomic_int_get(&session->gstrunVideo)) {
-             JANUS_LOG (LOG_INFO, "---------------RESTART  GST VIDEO THREAD RECONNECT LOOP --------------\n");
+             JANUS_LOG (LOG_INFO, "---------------RESTART  GST VIDEO THREAD RECONNECT LOOP --%s:%d:%d\n",
+				publisher->room_id_str,video_rtpforwardport,session->video_rtpforwardport);
           }
 	  else {
-            JANUS_LOG (LOG_INFO, "---------------LEAVING GST VIDEO THREAD RECONNECT LOOP --------------\n");
+            JANUS_LOG (LOG_INFO, "---------------LEAVING GST VIDEO THREAD RECONNECT LOOP --%s:%d:%d\n",
+				publisher->room_id_str,video_rtpforwardport,session->video_rtpforwardport);
             break;
           }
        } while(1);
     }
-    JANUS_LOG (LOG_INFO, "---------------LEAVING GST VIDEO THREAD  --------------\n");
+    JANUS_LOG (LOG_INFO, "---------------LEAVING GST VIDEO THREAD  --%s:%d:%d\n",
+			publisher->room_id_str,video_rtpforwardport,session->video_rtpforwardport);
     JANUS_LOG (LOG_INFO, "Leaving gstr video pipeline thread..\n");
     g_thread_unref (g_thread_self());
     janus_refcount_decrease(&session->ref);
