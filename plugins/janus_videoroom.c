@@ -5012,9 +5012,8 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                             }
                             /*CARBYNE-RF-end*/
                             /*CARBYNE-GST*/
-                	    JANUS_LOG (LOG_INFO, "BEFORE PIPELINE  PIPELINE--------------------------------%d\n",session->rtpforwardport);
 		            if(g_atomic_int_get(&participant->room->gstrun)) {
-			       JANUS_LOG (LOG_WARN, "RESTART PIPELINE--------------------------------%d\n",session->rtpforwardport);
+			       JANUS_LOG (LOG_WARN, "CLOSE PIPELINE--------------------------------%d\n",session->rtpforwardport);
                                g_atomic_int_set(&participant->room->gstrun,0); /*previus thread will be closed*/
                                usleep(200000);
 			    }
@@ -5526,12 +5525,10 @@ static void * janus_gst_gst_thread (void * data) {
     }
    janus_refcount_increase(&session->ref);
    janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
-    unsigned int rtpforwardport = session->rtpforwardport ;
-    JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 1    --%s:%d:%d\n",
-			publisher->room_id_str, rtpforwardport,session->rtpforwardport);
-    if (session->is_gst) {
+   janus_videoroom *room = publisher->room; 
+   JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 1    -------%s:%d\n",publisher->room_id_str,session->rtpforwardport);
+   if (session->is_gst) {
        janus_gstr * gstr;
-       janus_videoroom *room = publisher->room; 
        do {
            gstr = janus_gst_create_pipeline(publisher->vcodec, publisher->room_id_str, publisher->room_id, session->rtpforwardport);
            if(gstr != NULL)
@@ -5541,8 +5538,7 @@ static void * janus_gst_gst_thread (void * data) {
               session->gstr = gstr;
             }
             else {
-               JANUS_LOG (LOG_ERR, "Invalid gstreamer pipeline..   -----%d:%d\n",
-                          rtpforwardport,session->rtpforwardport);
+               JANUS_LOG (LOG_ERR, "Invalid gstreamer pipeline..   --------%d\n",session->rtpforwardport);
                g_thread_unref (g_thread_self());
 	       janus_refcount_decrease(&session->ref);
                goto error;
@@ -5550,8 +5546,7 @@ static void * janus_gst_gst_thread (void * data) {
 
            gst_element_set_state (gstr->pipeline, GST_STATE_PLAYING);
            if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
-               JANUS_LOG (LOG_ERR, "Unable to play pipeline..!   -----%d:%d\n",
-                           rtpforwardport,session->rtpforwardport);
+               JANUS_LOG (LOG_ERR, "Unable to play pipeline..!   --------%d\n",session->rtpforwardport);
                gst_object_unref (GST_OBJECT(gstr->pipeline));
                g_free (gstr);
                session->gstr = NULL;
@@ -5572,8 +5567,7 @@ static void * janus_gst_gst_thread (void * data) {
                return NULL;
            }
 
-           JANUS_LOG (LOG_INFO, "---------------START GST THREAD WHILE -------------   --%d:%d\n",
-                         rtpforwardport,session->rtpforwardport);
+           JANUS_LOG (LOG_INFO, "---------------START GST THREAD WHILE ---------%d\n",session->rtpforwardport);
            JANUS_LOG (LOG_INFO, "Joining gstr thread..\n");
 
            g_atomic_int_set(&room->gstrun, 1);
@@ -5587,8 +5581,7 @@ static void * janus_gst_gst_thread (void * data) {
           }
           usleep(100000); //0.1s
 
-          JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE ------%d:%d\n",
-                        rtpforwardport,session->rtpforwardport);
+          JANUS_LOG (LOG_INFO, "---------------STOP GST THREAD WHILE -------%d\n",session->rtpforwardport);
           gst_object_unref (gstr->bus);
           gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
           if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
@@ -5599,18 +5592,15 @@ static void * janus_gst_gst_thread (void * data) {
           session->gstr = NULL;
 
           if(g_atomic_int_get(&room->gstrun)) {
-             JANUS_LOG (LOG_INFO, "---------------RESTART  GST THREAD RECONNECT LOOP ------------- %d:%d\n",
-                        rtpforwardport,session->rtpforwardport);
+             JANUS_LOG (LOG_INFO, "---------------RESTART  GST THREAD RECONNECT LOOP ---------%d\n",session->rtpforwardport);
           }
 	  else {
-            JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD RECONNECT LOOP ----------%d:%d\n",
-                        rtpforwardport,session->rtpforwardport);
+            JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD RECONNECT LOOP -----------%d\n",session->rtpforwardport);
             break; 
           }
        } while(1);
     }
-    JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD  ------------%d:%d\n",
-                        rtpforwardport,session->rtpforwardport);
+    JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD  ----------%d\n",session->rtpforwardport);
     JANUS_LOG (LOG_INFO, "Leaving gstr pipeline thread..\n");
     g_thread_unref (g_thread_self());
     janus_refcount_decrease(&session->ref);
