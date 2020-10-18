@@ -2704,8 +2704,20 @@ static void janus_videoroom_leave_or_unpublish(janus_videoroom_publisher *partic
 		janus_mutex_unlock(&rooms_mutex);
 		return;
 	}
-	g_atomic_int_set(&participant->room->gstrunVideo, 0);/*CARBYNE-GST */
-	g_atomic_int_set(session->is_ingress?&participant->room->gstrunIngressAudio:&participant->room->gstrunEgressAudio, 0);/*CARBYNE-GST */
+	if(participant->video) {
+                JANUS_LOG(LOG_VERB, "Stop Video Thread... \n");
+		g_atomic_int_set(&participant->room->gstrunVideo, 0);/*CARBYNE-GST */
+	}
+
+	 if (participant->video && participant->audio) {
+                JANUS_LOG(LOG_VERB, "Stop IngressAudio Thread... \n");
+		g_atomic_int_set(&participant->room->gstrunIngressAudio, 0);/*CARBYNE-GST */
+	} else if (!participant->video && participant->audio) {
+                JANUS_LOG(LOG_VERB, "Stop EgressAudio Thread... \n");
+		g_atomic_int_set(&participant->room->gstrunEgressAudio, 0);/*CARBYNE-GST */
+        } else {
+		JANUS_LOG(LOG_VERB, "No media Thread  to stop... \n");
+	}
 
 	janus_mutex_unlock(&rooms_mutex);
 	janus_videoroom *room = participant->room;
