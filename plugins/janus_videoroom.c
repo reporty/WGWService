@@ -2199,6 +2199,9 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 		if(string_ids) {
 			JANUS_LOG(LOG_INFO, "VideoRoom will use alphanumeric IDs, not numeric\n");
 		}
+		else {
+                        JANUS_LOG(LOG_INFO, "VideoRoom will use numeric IDs\n");
+                }
 	}
 	rooms = g_hash_table_new_full(string_ids ? g_str_hash : g_int64_hash, string_ids ? g_str_equal : g_int64_equal,
 		(GDestroyNotify)g_free, (GDestroyNotify)janus_videoroom_room_destroy);
@@ -2701,6 +2704,9 @@ static void janus_videoroom_leave_or_unpublish(janus_videoroom_publisher *partic
 		janus_mutex_unlock(&rooms_mutex);
 		return;
 	}
+	g_atomic_int_set(&participant->room->gstrunVideo, 0);/*CARBYNE-GST */
+	g_atomic_int_set(session->is_ingress?&participant->room->gstrunIngressAudio:&participant->room->gstrunEgressAudio, 0);/*CARBYNE-GST */
+
 	janus_mutex_unlock(&rooms_mutex);
 	janus_videoroom *room = participant->room;
 	if(!room || g_atomic_int_get(&room->destroyed))
@@ -6310,8 +6316,6 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 	if(session->participant_type == janus_videoroom_p_type_publisher) {
 		/* This publisher just 'unpublished' */
 		janus_videoroom_publisher *participant = janus_videoroom_session_get_publisher(session);
-                g_atomic_int_set(&participant->room->gstrunVideo, 0);/*CARBYNE-GST */ 
-                g_atomic_int_set(session->is_ingress?&participant->room->gstrunIngressAudio:&participant->room->gstrunEgressAudio, 0);/*CARBYNE-GST */
 		/* Get rid of the recorders, if available */
 		janus_mutex_lock(&participant->rec_mutex);
 		g_free(participant->recording_base);
