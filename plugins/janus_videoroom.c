@@ -1415,7 +1415,6 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
 static void *janus_gst_relay_thread(void *data); /*CARBYNE-GST relay*/
 static void *janus_gst_gst_thread_audio(void *data); /*CARBYNE-GST*/
 static void *janus_gst_gst_thread_video(void *data); /*CARBYNE-GST*/
-//static void *janus_gst_gst_thread_audio_mix(void *data); /*CARBYNE-GST*/
 static void *janus_videoroom_handler(void *data);
 static void janus_videoroom_relay_rtp_packet(gpointer data, gpointer user_data);
 static void janus_videoroom_relay_data_packet(gpointer data, gpointer user_data);
