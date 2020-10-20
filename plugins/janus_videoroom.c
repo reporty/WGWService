@@ -4986,7 +4986,6 @@ gboolean forward_media(janus_videoroom_session *session, gboolean is_audio) {
                 if(!is_audio ) {
 
 			allocate_socket(&participant->room->video_fd,  &participant->room->video_rtpforwardport);
-
 	                participant->video_rtp_forward_stream_id = janus_videoroom_rtp_forwarder_add_helper(participant,
                                                                         "127.0.0.1",/* host*/
                                                                         participant->room->video_rtpforwardport,/* video_port[0],*/
