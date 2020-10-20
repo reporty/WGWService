@@ -1473,6 +1473,7 @@ typedef struct janus_videoroom {
 	gboolean notify_joining;	/* Whether an event is sent to notify all participants if a new participant joins the room */
 	janus_mutex mutex;			/* Mutex to lock this room instance */
 	janus_refcount ref;			/* Reference counter for this room */
+
 	volatile gint gstrunIngressAudio; /*CARBYNE-GST*/
         volatile gint gstrunEgressAudio; /*CARBYNE-GST*/
         volatile gint gstrunVideo; /*CARBYNE-GST*/
@@ -1482,6 +1483,7 @@ typedef struct janus_videoroom {
 	int audio_ingress_fd;/*CARBYNE-RF*/
 	int audio_egress_fd;/*CARBYNE-RF*/
 	int video_fd;/*CARBYNE-RF*/
+
 } janus_videoroom;
 static GHashTable *rooms;
 static janus_mutex rooms_mutex = JANUS_MUTEX_INITIALIZER;
@@ -1509,8 +1511,8 @@ typedef struct janus_videoroom_session {
 	volatile gint dataready;
 	volatile gint hangingup;
 	volatile gint destroyed;
-        volatile gint rtsprunAudio; /*CARBYNE-GST*/
-        volatile gint rtsprunVideo; /*CARBYNE-GST*/
+  volatile gint rtsprunAudio; /*CARBYNE-GST*/
+  volatile gint rtsprunVideo; /*CARBYNE-GST*/
 	janus_mutex mutex;
 	janus_refcount ref;
        /*CARBYNE-GST*/
@@ -2206,7 +2208,8 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 		if(string_ids) {
 			JANUS_LOG(LOG_INFO, "VideoRoom will use alphanumeric IDs, not numeric\n");
 		}
-		else {
+
+    else {
                         JANUS_LOG(LOG_INFO, "VideoRoom will use numeric IDs\n");
                 }
 	}
@@ -2725,7 +2728,7 @@ static void janus_videoroom_leave_or_unpublish(janus_videoroom_publisher *partic
         } else {
 		JANUS_LOG(LOG_VERB, "No media Thread  to stop... \n");
 	}
-
+  
 	janus_mutex_unlock(&rooms_mutex);
 	janus_videoroom *room = participant->room;
 	if(!room || g_atomic_int_get(&room->destroyed))
@@ -5189,8 +5192,7 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                                 	goto error;
                         	}
 			}
-
-	                janus_refcount_decrease(&participant->ref);
+      janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 			janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)session->participant;
 			if(s && s->feed) {
@@ -5769,8 +5771,8 @@ static void * janus_gst_gst_thread_audio (void * data) {
    janus_refcount_increase(&session->ref);
    janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
    janus_videoroom *room = publisher->room; 
- 
-    JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST %s AUDIO 1  -------------%d\n",session->is_ingress?"INGRESS":"EGRESS",
+
+   JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST %s AUDIO 1  -------------%d\n",session->is_ingress?"INGRESS":"EGRESS",
         session->is_ingress?room->audio_ingress_rtpforwardport:room->audio_egress_rtpforwardport);
     if (session->is_gst) {
        janus_gstr * gstr;
@@ -5893,6 +5895,7 @@ static void * janus_gst_gst_thread_video (void * data) {
     janus_videoroom *room = publisher->room;
     JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST 1 VIDEO  -------%s:%d\n",publisher->room_id_str,room->video_rtpforwardport);
     if (session->is_gst) {
+
        janus_gstr * gstr;
        do {
            gstr = janus_gst_create_pipeline_video(publisher->vcodec, publisher->room_id_str, publisher->room_id, room->video_rtpforwardport);
@@ -5968,6 +5971,7 @@ static void * janus_gst_gst_thread_video (void * data) {
     }
     JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD  ----------%d\n",room->video_rtpforwardport);
     JANUS_LOG (LOG_INFO, "Leaving gstr video pipeline thread..\n");
+
     g_thread_unref (g_thread_self());
     janus_refcount_decrease(&session->ref);
     return NULL;
