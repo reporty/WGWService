@@ -5002,17 +5002,18 @@ gboolean forward_media(janus_videoroom_session *session, gboolean is_audio) {
                 	JANUS_LOG(LOG_INFO, "CARBYNE::::  video_rtp_forward_stream_id: %"SCNu64"\n",participant->video_rtp_forward_stream_id );
                 }
                 if(is_audio) {
-			if(! participant->room->audio_ingress_rtpforwardport &&
-			    !participant->room->audio_egress_rtpforwardport) {
-				if(!allocate_socket(&participant->room->audio_ingress_fd, &participant->room->audio_ingress_rtpforwardport)) {
-				   return FALSE;
-				}
-			        JANUS_LOG(LOG_INFO, "CARBYNE::::  created port for ingress audio forward : %d\n",participant->room->audio_ingress_rtpforwardport );
-				if(!allocate_socket(&participant->room->audio_egress_fd, &participant->room->audio_egress_rtpforwardport)) {
-					return FALSE;
-				}
-                                JANUS_LOG(LOG_INFO, "CARBYNE::::  created port for egress audio forward : %d\n",participant->room->audio_egress_rtpforwardport );
-			}
+                        if(!allocate_socket(session->is_ingress?&participant->room->audio_ingress_fd:
+								&participant->room->audio_egress_fd,  
+					    session->is_ingress?&participant->room->audio_ingress_rtpforwardport:
+								&participant->room->audio_egress_rtpforwardport)) {
+                	        return FALSE;
+                        }
+
+			JANUS_LOG(LOG_INFO, "CARBYNE::::  created port for %s  audio forward : %d\n",
+						session->is_ingress?"INGRESS":"EGRESS", 
+						session->is_ingress?participant->room->audio_ingress_rtpforwardport:
+                                                                    participant->room->audio_egress_rtpforwardport );
+
                		participant->audio_rtp_forward_stream_id = janus_videoroom_rtp_forwarder_add_helper(participant,
                                                                         "127.0.0.1",/* host*/
                                                                         session->is_ingress?participant->room->audio_ingress_rtpforwardport:
@@ -5171,10 +5172,24 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 				session->is_ingress = TRUE;
 			}
 
-			if(!forward_media(session, (participant->audio && ! participant->video) )){
-                                janus_refcount_decrease(&participant->ref);
-                                goto error;
-                        } 
+			//if(!forward_media(session, (participant->audio && ! participant->video) )){
+                        //        janus_refcount_decrease(&participant->ref);
+                        //        goto error;
+                        //} 
+			/*CARBYNE:  Forward Support for Audio started with video */
+			if(participant->audio) {
+                        	if(!forward_media(session, TRUE )) {
+                                	janus_refcount_decrease(&participant->ref);
+                                	goto error;
+                        	}
+			}
+			if(participant->video) {
+                        	if(!forward_media(session, FALSE )) {
+                                	janus_refcount_decrease(&participant->ref);
+                                	goto error;
+                        	}
+			}
+
 	                janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 			janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)session->participant;
