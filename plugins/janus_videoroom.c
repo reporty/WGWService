@@ -1413,7 +1413,6 @@ static char *auth_secret = NULL;      /*CARBYNE-AUT*/
 static char *rtsp_url = NULL;         /*CARBYNE-RF*/
 static gboolean auth_enabled = FALSE; /*CARBYNE-AUT*/
 static gboolean janus_auth_check_signature(const char *token, const char *room) ;/*CARBYNE-AUT*/
-static void *janus_gst_relay_thread(void *data); /*CARBYNE-GST relay*/
 static void *janus_gst_gst_thread(void *data); /*CARBYNE-GST*/
 static void *janus_videoroom_handler(void *data);
 static void janus_videoroom_relay_rtp_packet(gpointer data, gpointer user_data);
@@ -5570,18 +5569,6 @@ static void * janus_gst_gst_thread (void * data) {
                janus_refcount_decrease(&session->ref);
                return NULL;
            }
-           GError * error = NULL;
-           g_thread_try_new ("playout", &janus_gst_relay_thread, session, &error);
-           if (error != NULL) {
-               JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer relay thread...\n", error->code,
-                                    error->message ? error->message : "??");
-               gst_object_unref (GST_OBJECT(gstr->pipeline));
-               g_free (gstr);
-               session->gstr = NULL;
-               g_thread_unref (g_thread_self());
-               janus_refcount_decrease(&session->ref);
-               return NULL;
-           }
 
            JANUS_LOG (LOG_INFO, "---------------START GST THREAD WHILE ---------%d\n",session->rtpforwardport);
            JANUS_LOG (LOG_INFO, "Joining gstr thread..\n");
@@ -5644,12 +5631,6 @@ error:
    return NULL; 
 }
 /*CARBYNE-GST-end*/
-
-/*CARBYNE-GST relay*/
-static void * janus_gst_relay_thread (void * data) {
-  return NULL;
-}
-/*CARBYNE-GST-stop relay*/
 
 void janus_videoroom_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *packet) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
@@ -8366,8 +8347,8 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
     char timestampBase64[XL_BUFFER_SIZE] = {0};
     const unsigned char *timestampBase64Safe = (const unsigned char *)parts[0];
     size_t timestampBase64SafeLen = strlen((char *)timestampBase64Safe);
-    memset(timestampBase64,'=',XL_BUFFER_SIZE);
-
+    memset(timestampBase64,'=',XL_BUFFER_SIZE * sizeof(char));
+    timestampBase64[XL_BUFFER_SIZE-1]= '\0';
     for(unsigned int i=0;i< timestampBase64SafeLen ; i++) {
        switch(timestampBase64Safe[i]) {
          case '_':
@@ -8389,7 +8370,8 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
     gint64 real_time = janus_get_real_time() / 1000;
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
-    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);    
+    JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);
+    g_free(timestamp); 
     if(real_time >  timestamp_time) {
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail,  Verify timestamp\n");
         goto fail;
@@ -8397,6 +8379,7 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
 
   /* prepare message for compare with signature  */
     char message[XL_BUFFER_SIZE] = { 0 };
+    memset(message,0,XL_BUFFER_SIZE * sizeof(char));
     g_snprintf(message, XL_BUFFER_SIZE,"%s:%s:%s",(char*)room,(char*)parts[0],(char*)parts[1]);
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth: message of  token:%s \n", message);
     /* Verify HMAC-SHA256 */
