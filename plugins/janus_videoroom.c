@@ -2250,6 +2250,15 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 			janus_config_item *lock_record = janus_config_get(config, cat, janus_config_type_item, "lock_record");
 			/* Create the video room */
 			janus_videoroom *videoroom = g_malloc0(sizeof(janus_videoroom));
+
+			/*CARBYNE-AUDIO*/
+			videoroom->audio_ingress_rtpforwardport = 0;
+			videoroom->audio_egress_rtpforwardport = 0;
+			videoroom->video_rtpforwardport = 0;
+			videoroom->audio_ingress_fd=0;
+			videoroom->audio_egress_fd =0;
+			videoroom->video_fd =0;
+
 			const char *room_num = cat->name;
 			if(strstr(room_num, "room-") == room_num)
 				room_num += 5;
@@ -3180,6 +3189,15 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		}
 		/* Create the room */
 		janus_videoroom *videoroom = g_malloc0(sizeof(janus_videoroom));
+
+		/*CARBYNE-AUDIO*/
+		videoroom->audio_ingress_rtpforwardport = 0;
+		videoroom->audio_egress_rtpforwardport = 0;
+		videoroom->video_rtpforwardport = 0;
+		videoroom->audio_ingress_fd= 0;
+		videoroom->audio_egress_fd = 0;
+		videoroom->video_fd = 0;
+
 		/* Generate a random ID */
 		gboolean room_id_allocated = FALSE;
 		if(!string_ids && room_id == 0) {
@@ -5000,17 +5018,17 @@ gboolean forward_media(janus_videoroom_session *session, gboolean is_audio) {
                 	JANUS_LOG(LOG_INFO, "CARBYNE::::  video_rtp_forward_stream_id: %"SCNu64"\n",participant->video_rtp_forward_stream_id );
                 }
                 if(is_audio) {
-                        if(!allocate_socket(session->is_ingress?&participant->room->audio_ingress_fd:
-								&participant->room->audio_egress_fd,  
-					    session->is_ingress?&participant->room->audio_ingress_rtpforwardport:
-								&participant->room->audio_egress_rtpforwardport)) {
-                	        return FALSE;
-                        }
-
-			JANUS_LOG(LOG_INFO, "CARBYNE::::  created port for %s  audio forward : %d\n",
-						session->is_ingress?"INGRESS":"EGRESS", 
-						session->is_ingress?participant->room->audio_ingress_rtpforwardport:
-                                                                    participant->room->audio_egress_rtpforwardport );
+			if(! participant->room->audio_ingress_rtpforwardport &&
+			   !participant->room->audio_egress_rtpforwardport) {
+				if(!allocate_socket(&participant->room->audio_ingress_fd, &participant->room->audio_ingress_rtpforwardport)) {
+					return FALSE;
+				}
+				JANUS_LOG(LOG_INFO, "CARBYNE::::  created port for ingress audio forward : %d\n",participant->room->audio_ingress_rtpforwardport );
+				if(!allocate_socket(&participant->room->audio_egress_fd, &participant->room->audio_egress_rtpforwardport)) {
+					return FALSE;
+				}
+				JANUS_LOG(LOG_INFO, "CARBYNE::::  created port for egress audio forward : %d\n",participant->room->audio_egress_rtpforwardport );
+			}
 
                		participant->audio_rtp_forward_stream_id = janus_videoroom_rtp_forwarder_add_helper(participant,
                                                                         "127.0.0.1",/* host*/
