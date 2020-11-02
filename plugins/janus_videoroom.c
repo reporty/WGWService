@@ -5898,6 +5898,7 @@ static void * janus_gst_gst_thread_video (void * data) {
                return NULL;
            }
 
+
            JANUS_LOG (LOG_INFO, "---------------START GST VIDEO THREAD WHILE ---------%d\n",room->video_rtpforwardport);
            JANUS_LOG (LOG_INFO, "Joining gstr video thread..\n");
 
@@ -8710,7 +8711,7 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp     :%s \n",timestamp);
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  timestamp_time:%ld \n",timestamp_time);
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth:  real_time     :%ld \n",real_time);
-    g_free(timestamp);
+    g_free(timestamp); 
     if(real_time >  timestamp_time) {
         JANUS_LOG(LOG_ERR, "janus_videoroom: auth: fail,  Verify timestamp\n");
         goto fail;
