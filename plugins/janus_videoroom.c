@@ -1521,9 +1521,6 @@ typedef struct janus_videoroom_session {
         janus_gstr * gstrVideo;
         gboolean is_gst;
 	gboolean is_ingress; /* is Caller */
-//        unsigned int audio_rtpforwardport;/*CARBYNE-GST*/
-//        unsigned int video_rtpforwardport;/*CARBYNE-GST*/
-        //GAsyncQueue * vpackets;
         /*CARBYNE-GST end*/
 } janus_videoroom_session;
 static GHashTable *sessions;
@@ -5160,9 +5157,6 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                              JANUS_LOG(LOG_WARN, "Publisher   AUDIO!!!:----------------------------------- publisher  (%"SCNu64")\n",participant->user_id);
                           if(participant->video)
                              JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  (%"SCNu64")\n",participant->user_id);
-                         //       janus_refcount_decrease(&participant->ref);
-                         //       goto quit;
-
                         /*******************************************/
                         if(participant->audio && ! participant->video){
 				JANUS_LOG(LOG_WARN, "[%s-%p]AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
@@ -5173,11 +5167,6 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 				JANUS_LOG(LOG_WARN, "[%s-%p]VIDEO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
 				session->is_ingress = TRUE;
 			}
-
-			//if(!forward_media(session, (participant->audio && ! participant->video) )){
-                        //        janus_refcount_decrease(&participant->ref);
-                        //        goto error;
-                        //} 
 			/*CARBYNE:  Forward Support for Audio started with video */
 			if(participant->audio) {
                         	if(!forward_media(session, TRUE )) {
@@ -5637,7 +5626,6 @@ static janus_gstr * janus_gst_create_pipeline_audio( janus_audiocodec acodec,
            }
        }
        g_object_set(gstr->wvsink, "location",rtspline, NULL);
-//       g_object_set(gstr->wvsink, "tcp-timeout",GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, NULL);
        GstCaps * source_caps = NULL;
        if(acodec == JANUS_AUDIOCODEC_OPUS) {
            source_caps = gst_caps_new_simple ("application/x-rtp",
