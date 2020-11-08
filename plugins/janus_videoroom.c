@@ -5152,20 +5152,44 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 
                         JANUS_LOG(LOG_WARN, "Publisher: audio %d, video %d,   \n",participant->audio, participant->video);
                         JANUS_LOG(LOG_WARN, "Publisher: audio_pt %u, video_pt %u,   \n",participant->audio_pt, participant->video_pt);
-                        /*******************************************/
-                          if(participant->audio)
-                             JANUS_LOG(LOG_WARN, "Publisher   AUDIO!!!:----------------------------------- publisher  (%"SCNu64")\n",participant->user_id);
-                          if(participant->video)
-                             JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  (%"SCNu64")\n",participant->user_id);
-                        /*******************************************/
+
+			if(string_ids) {
+                        	if(participant->audio) {
+					JANUS_LOG(LOG_WARN, "Publisher   AUDIO!!!:----------------------------------- publisher %s\n", participant->user_id_str);
+				}
+				if(participant->video) {
+					JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  %s\n", participant->user_id_str);
+				}
+                                if (participant->user_id_str == participant->room_id_str)
+                                {
+                                        session->is_ingress = TRUE;
+                                }
+                                else {
+                                        session->is_ingress = FALSE;
+                                }
+
+			}
+			else {
+				if(participant->audio) {
+					JANUS_LOG(LOG_WARN, "Publisher   AUDIO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
+				}
+				if(participant->video) {
+                             		JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
+				}
+				if (participant->user_id == participant->room_id) 
+                                {
+					session->is_ingress = TRUE;
+				}
+				else {
+					session->is_ingress = FALSE;
+				}
+			}
                         if(participant->audio && ! participant->video){
 				JANUS_LOG(LOG_WARN, "[%s-%p]AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
-				session->is_ingress = FALSE;
                         }
 			else 
 			{
 				JANUS_LOG(LOG_WARN, "[%s-%p]VIDEO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
-				session->is_ingress = TRUE;
 			}
 			/*CARBYNE:  Forward Support for Audio started with video */
 			if(participant->audio) {
@@ -5764,7 +5788,7 @@ static void * janus_gst_gst_thread_audio (void * data) {
     if (session->is_gst) {
        janus_gstr * gstr;
        do {
-           gstr = janus_gst_create_pipeline_audio(publisher->vcodec,
+           gstr = janus_gst_create_pipeline_audio(publisher->acodec,
 						  publisher->room_id_str,
 						  publisher->room_id,
 						  session->is_ingress?room->audio_ingress_rtpforwardport:room->audio_egress_rtpforwardport,
