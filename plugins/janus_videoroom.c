@@ -5002,7 +5002,7 @@ gboolean forward_media(janus_videoroom_session *session, gboolean is_audio) {
                 if(participant->udp_sock <= 0 ||
                         setsockopt(participant->udp_sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0) {
                         JANUS_LOG(LOG_ERR, "Could not open UDP socket for RTP stream for publisher (%"SCNu64")\n",participant->user_id);
-                        // goto prepare_response;
+                        return FALSE;
                 }
         }
         JANUS_LOG(LOG_WARN, "forward_media:  Publisher is  %s \n",participant->is_ingress?"INGRESS":"EGRESS");
@@ -5713,34 +5713,6 @@ static janus_gstr * janus_gst_create_pipeline_audio_mixer( janus_audiocodec acod
                                 g_snprintf(rtspline_egress, JANUS_RTP_FORWARD_STRING_SIZE, "%sEGRESS_AUDIO_%s", rtsp_url, room_id_str );
 			}
 		}
-/*
-    		snprintf(launchString, sizeof(launchString),
-		"udpsrc port=%d timeout=60000000000"
-		" caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" !"
-		" queue max-size-time=1000000 ! rtpopusdepay ! tee name=ingressTee"
- 		" udpsrc port=%d timeout=60000000000 caps=\"application/x-rtp,media=audio,encoding-name=OPUS\"  !"
-		" queue max-size-time=1000000  ! rtpopusdepay ! tee name=egressTee "
-		" audiomixer name=mix "
-		" rtspclientsink name=rtspClientSinkMix protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=3000000 location=\"%s\" latency=0"
-		" ingressTee. ! opusdec ! audioconvert ! queue max-size-time=1000000  ! mix. "
-		" egressTee. ! opusdec ! audioconvert ! queue max-size-time=1000000   ! mix. "
-		" mix. !  audioconvert ! audio/x-raw,rate=8000 ! opusenc !  queue max-size-time=40000000 ! rtspClientSinkMix. ",
-		rtpforwardport_ingress, rtpforwardport_egress, rtspline_mix);
-*/
-/*work with tee:
-                snprintf(launchString, sizeof(launchString),
-                "udpsrc port=%d timeout=60000000000"
-                " caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" !"
-                " queue max-size-time=1000000 ! rtpopusdepay ! tee name=ingressTee"
-                " udpsrc port=%d timeout=60000000000 caps=\"application/x-rtp,media=audio,encoding-name=OPUS\"  !"
-                " queue max-size-time=1000000  ! rtpopusdepay ! tee name=egressTee "
-                " audiomixer name=mix "
-                " rtspclientsink name=rtspClientSinkMix protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=3000000 location=\"%s\" latency=0"
-                " ingressTee. ! opusdec ! audioconvert  ! mix. "
-                " egressTee. ! opusdec ! audioconvert   ! mix. "
-                " mix. !  audioconvert ! audio/x-raw,rate=8000 ! opusenc !   rtspClientSinkMix. ",
-                rtpforwardport_ingress, rtpforwardport_egress, rtspline_mix);
-*/
 
                 snprintf(launchString, sizeof(launchString),
                 "udpsrc port=%d timeout=60000000000"
@@ -5824,6 +5796,7 @@ static janus_gstr * janus_gst_create_pipeline_audio( janus_audiocodec acodec,
        }
 	return gstr;
 }
+
 static janus_gstr * janus_gst_create_pipeline_video( janus_videocodec vcodec,
                                                const char * room_id_str, 
                                                guint64 room_id,
@@ -5976,8 +5949,7 @@ static void * janus_gst_gst_thread_audio_mixer (void * data) {
                    g_atomic_int_get(&room->rtsprunMixerAudio)) {
                    usleep(50000); //0.05s
           }
-          // usleep(100000); //0.1s
-	 usleep(2000000); // 2s
+          usleep(100000); //0.1s
 	 JANUS_LOG (LOG_INFO, "---------------STOP GST MIX AUDIO THREAD WHILE --------- %d %d %d-----\n", 
 			g_atomic_int_get(&room->gstrunIngressAudio), g_atomic_int_get(&room->gstrunEgressAudio), g_atomic_int_get(&room->rtsprunMixerAudio));
           gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
