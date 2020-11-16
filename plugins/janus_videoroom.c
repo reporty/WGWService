@@ -5005,7 +5005,7 @@ gboolean forward_media(janus_videoroom_session *session, gboolean is_audio) {
                         // goto prepare_response;
                 }
         }
-
+        JANUS_LOG(LOG_WARN, "forward_media:  Publisher is  %s \n",participant->is_ingress?"INGRESS":"EGRESS");
         if (participant->room) {
                 janus_mutex_lock(&participant->room->mutex);
                 if(!is_audio ) {
@@ -5212,16 +5212,18 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                         /*******************************************/
 			if(string_ids) {
 				if(participant->audio) {
-					JANUS_LOG(LOG_WARN, "Publisher   AUDIO!!!:----------------------------------- publisher %s\n", participant->user_id_str);
+					JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Publisher   AUDIO!!!:-- publisher %s\n", participant->user_id_str);
 				}
 				if(participant->video) {
-					JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  %s\n", participant->user_id_str);
+					JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Publisher    VIDEO!!!:--publisher  %s\n", participant->user_id_str);
 				}
-                                if (participant->user_id_str == participant->room_id_str)
+                                if (!strcmp(participant->user_id_str,participant->room_id_str))
                                 {
+					JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Set Publisher INGRESS \n");
                                         participant->is_ingress = TRUE;
                                 }
                                 else {
+                                        JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Set Publisher EGRESS \n");
                                         participant->is_ingress = FALSE;
                                 }
 
@@ -5234,9 +5236,11 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
                         		JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
                 		}
                 		if (participant->user_id == participant->room_id) {
+                                        JANUS_LOG(LOG_WARN, "Set Publisher INGRESS \n");
                     			participant->is_ingress = TRUE;
                 		}
                 		else {
+                                        JANUS_LOG(LOG_WARN, "Set Publisher EGRESS \n");
                     			participant->is_ingress = FALSE;
                		 	}
             		}
