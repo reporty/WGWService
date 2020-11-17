@@ -5802,93 +5802,63 @@ static janus_gstr * janus_gst_create_pipeline_video( janus_videocodec vcodec,
                                                guint64 room_id,
                                                unsigned int rtpforwardport) {
 
+         char launchString[MAX_STRING_LEN];
+         GError *error = NULL;
          janus_gstr *gstr = (janus_gstr *)g_malloc0(sizeof(janus_gstr));
          if (gstr == NULL) {
                JANUS_LOG(LOG_FATAL,"Memory error..\n");
             return NULL;
          }
-        JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST VIDEO 2 --------------\n");
-        if(vcodec == JANUS_VIDEOCODEC_VP8) {
-            JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------\n");
-            gstr->wvsource = gst_element_factory_make ("udpsrc","udp_src");
-            gstr->wvjitter = gst_element_factory_make ("rtpjitterbuffer","rtp_jitter_buffer");
-            gstr->wvrtpdepay = gst_element_factory_make ("rtpvp8depay","rtp_vp8_depay");
-            gstr->wvqueue = gst_element_factory_make ("queue","video_queue");
-            gstr->wvsink = gst_element_factory_make ("rtspclientsink","rtsp_client_sink");
-       } else if (vcodec == JANUS_VIDEOCODEC_H264) {
-            JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------\n");
-            gstr->wvsource = gst_element_factory_make ("udpsrc","udp_src");
-            gstr->wvrtpdepay = gst_element_factory_make ("rtph264depay","rtp_h264_depay");
-            gstr->wvparse    = gst_element_factory_make ("h264parse","h264_parse");
-            gstr->wvsink = gst_element_factory_make ("rtspclientsink","rtsp_client_sink");
-       } else if (vcodec == JANUS_VIDEOCODEC_VP9) {
-            JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------\n");
-       } else {
-         }
-       gstr->vfiltercaps = NULL;
-       gstr->isvCapsSet = FALSE;
-       gstr->pipeline = gst_pipeline_new("pipeline");
-       char  udpline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
-       g_snprintf(udpline,JANUS_RTP_FORWARD_STRING_SIZE, "udp://127.0.0.1:%d",rtpforwardport);
-       g_object_set(gstr->wvsource, "uri", udpline, NULL);
-       g_object_set(gstr->wvsink, "name", "sink", NULL);
-       char  rtspline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
-       if(rtsp_url != NULL) {
-           if(!string_ids) {
-               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%sVIDEO_%"SCNu64"", rtsp_url, room_id );
-           } else {
-               g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%sVIDEO_%s", rtsp_url, room_id_str );
-           }
-       }
-       g_object_set(gstr->wvsink, "location",rtspline, NULL);
-       g_object_set(gstr->wvsink, "tcp-timeout",GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, NULL);
-       GstCaps * source_caps = NULL;
-       if(vcodec == JANUS_VIDEOCODEC_VP8) {
-           source_caps = gst_caps_new_simple ("application/x-rtp",
-                                              "media", G_TYPE_STRING, "video",
-                                              "encoding-name", G_TYPE_STRING, "VP8",
-                                              NULL);
-       } else if (vcodec == JANUS_VIDEOCODEC_H264) {
-           JANUS_LOG (LOG_INFO, "CARBYNE:::::JANUS_VIDEOCODEC_H264 profile:42e01f\n");
-           source_caps = gst_caps_new_simple ("application/x-rtp",
-                                              "media", G_TYPE_STRING, "video",
-                                              "clock-rate",G_TYPE_INT,90000,
-                                              "profile-level-id", G_TYPE_STRING,"42e01f",
-                                              "encoding-name", G_TYPE_STRING, "H264",
-                                              NULL);
-       } else if (vcodec == JANUS_VIDEOCODEC_VP9) {
-           source_caps = gst_caps_new_simple ("application/x-rtp",
-                                              "media", G_TYPE_STRING, "video",
-                                              "encoding-name", G_TYPE_STRING, "VP9",
-                                              NULL);
-       } else {
-           JANUS_LOG (LOG_ERR, "Unsupported codec %d !!!\n", vcodec);
-           g_free (gstr);
-           return NULL;
-       }
-       GST_LOG ("caps are %" GST_PTR_FORMAT, source_caps);
-       g_object_set (G_OBJECT (gstr->wvsource), "caps", source_caps, NULL);
-       gst_caps_unref (source_caps);
 
-       if(vcodec == JANUS_VIDEOCODEC_VP8) {
-           gst_bin_add_many(GST_BIN(gstr->pipeline),gstr->wvsource,gstr->wvjitter,gstr->wvrtpdepay,
-                           gstr->wvqueue,gstr->wvsink,NULL);
-           if (gst_element_link_many (gstr->wvsource,gstr->wvjitter,gstr->wvrtpdepay,gstr->wvqueue,gstr->wvsink,  NULL) != TRUE) {
-               JANUS_LOG (LOG_ERR, "Failed to link GSTREAMER VIDEO elements in gstr!!!\n");
-               gst_object_unref (GST_OBJECT(gstr->pipeline));
+        JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST VIDEO 2 --------------\n");
+        gstr->vfiltercaps = NULL;
+        gstr->isvCapsSet = FALSE;
+        char  rtspline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
+        if(rtsp_url != NULL) {
+           if(!string_ids) {
+                   g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%sVIDEO_%"SCNu64"",rtsp_url, room_id );
+           } else {
+                   g_snprintf(rtspline, JANUS_RTP_FORWARD_STRING_SIZE, "%sVIDEO_%s", rtsp_url, room_id_str );
+            }
+        }
+
+        if(vcodec == JANUS_VIDEOCODEC_VP8) {
+                JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------\n");
+                snprintf(launchString, sizeof(launchString),
+                "udpsrc port=%d "
+                " caps=\"application/x-rtp,media=video,encoding-name=VP8\" !"
+                " rtpjitterbuffer ! rtpvp8depay ! queue ! "
+                " rtspclientsink name=rtspClientSink protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
+                rtpforwardport, GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, rtspline);
+        } else if (vcodec == JANUS_VIDEOCODEC_H264) {
+                JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------\n");
+                snprintf(launchString, sizeof(launchString),
+                "udpsrc port=%d "
+                " caps=\"application/x-rtp,media=video,clock-rate=90000,profile-level-id=42e01f,encoding-name=H264\" !"
+                " rtph264depay ! h264parse ! "
+                " rtspclientsink name=rtspClientSink protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
+                rtpforwardport,GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, rtspline);
+       } else if (vcodec == JANUS_VIDEOCODEC_VP9) {
+               JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------\n");
+               JANUS_LOG (LOG_ERR, "Unsupported codec %d !!!\n", vcodec);
                g_free (gstr);
                return NULL;
-           }
-       } else if (vcodec == JANUS_VIDEOCODEC_H264) {
-           gst_bin_add_many(GST_BIN(gstr->pipeline),gstr->wvsource,gstr->wvrtpdepay,gstr->wvparse,gstr->wvsink,NULL);
-           if (gst_element_link_many (gstr->wvsource,gstr->wvrtpdepay,gstr->wvparse,gstr->wvsink,  NULL) != TRUE) {
-               JANUS_LOG (LOG_ERR, "Failed to link GSTREAMER VIDEO  elements in gstr!!!\n");
-               gst_object_unref (GST_OBJECT(gstr->pipeline));
-               g_free (gstr);
-               return NULL;
-           }
-       }
-       return gstr;
+       } else {
+              JANUS_LOG (LOG_ERR, "Unsupported codec %d !!!\n", vcodec);
+              g_free (gstr);
+              return NULL;
+         }
+
+      JANUS_LOG (LOG_INFO, "CARBYNE:::::---try create VIDEO  pipeline:\n%s\n",launchString);
+      gstr->pipeline = gst_parse_launch(launchString, &error);
+      g_clear_error(&error);
+      if(NULL == gstr->pipeline) {
+          JANUS_LOG (LOG_ERR,"Pipeline creation failed could not continue\n");
+          gst_object_unref (GST_OBJECT(gstr->pipeline));
+          g_free (gstr);
+          return NULL;
+     }
+     return gstr;
 }
 
 static void * janus_gst_gst_thread_audio_mixer (void * data) {
