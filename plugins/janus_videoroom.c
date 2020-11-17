@@ -1438,11 +1438,7 @@ static janus_videoroom_message exit_message;
 
 /*CARBYNE-GST*/
 typedef struct janus_gstr {
-        GstElement * wvsource, * wvjitter, * wvrtpdepay;
-        GstElement * wvqueue, * wvparse, * wvsink;
         GstElement * pipeline;
-        GstCaps * vfiltercaps;
-        gboolean isvCapsSet;
         GstBus * bus;
 } janus_gstr;
 static gboolean  allocate_socket(int *fd, unsigned int *port);
@@ -5693,8 +5689,6 @@ static janus_gstr * janus_gst_create_pipeline_audio_mixer( janus_audiocodec acod
                JANUS_LOG(LOG_FATAL,"Memory error..\n");
             return NULL;
          }
-	gstr->vfiltercaps = NULL;
-	gstr->isvCapsSet = FALSE;
         JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST MIX AUDIO  2 -------%d %d\n", rtpforwardport_ingress, rtpforwardport_egress);
         if(acodec == JANUS_AUDIOCODEC_OPUS) {
 		JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_AUDIOCODEC_OPUS --------------\n");
@@ -5750,8 +5744,6 @@ static janus_gstr * janus_gst_create_pipeline_audio( janus_audiocodec acodec,
                JANUS_LOG(LOG_FATAL,"Memory error..\n");
             return NULL;
          }
-        gstr->vfiltercaps = NULL;
-        gstr->isvCapsSet = FALSE;
 
         JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST %s AUDIO  2 --------------%d\n",is_ingress?"INGRESS":"EGRESS", rtpforwardport);
         if(acodec == JANUS_AUDIOCODEC_OPUS) {
@@ -5811,8 +5803,6 @@ static janus_gstr * janus_gst_create_pipeline_video( janus_videocodec vcodec,
          }
 
         JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST VIDEO 2 --------------\n");
-        gstr->vfiltercaps = NULL;
-        gstr->isvCapsSet = FALSE;
         char  rtspline[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
         if(rtsp_url != NULL) {
            if(!string_ids) {
