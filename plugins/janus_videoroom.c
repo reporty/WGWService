@@ -5717,7 +5717,7 @@ static janus_gstr * janus_gst_create_pipeline_audio_mixer( janus_audiocodec acod
                 " tcp-timeout=3000000 location=\"%s\" latency=0"
                 " udpsrc name=udpsrcMixer2  port=%d timeout=60000000000 caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" ! "
 		" queue name=queueMixer2 max-size-time=1000000 ! rtpopusdepay  name=rtpopusdepayMixer2  ! opusdec  name=opusdecMixer2 !"
-                " audioconvert name=audioconvertcMixer2 ! mix. ",
+                " audioconvert name=audioconvertcMixer2 ! audiomixerMixer. ",
                 rtpforwardport_ingress, rtspline_mix, rtpforwardport_egress);
 
 	       	JANUS_LOG (LOG_INFO, "CARBYNE:::::-------MIXER pipeline:\n%s\n",launchString);
