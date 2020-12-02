@@ -5071,7 +5071,7 @@ gboolean forward_media(janus_videoroom_session *session, gboolean is_audio) {
                                 	g_atomic_int_set(&participant->room->gstrunEgressAudio, 1);
                         	}
 
-                                participant->room->is_gst_audiomixer = TRUE;
+                                participant->room->is_gst_audiomixer =  TRUE;
                                 JANUS_LOG(LOG_INFO, "CARBYNE:::: try to start   mixer thread\n");
                                 g_thread_try_new ("gstaudiomixer", &janus_gst_gst_thread_audio_mixer, participant->room, &error);
                 		participant->is_ingress?close(participant->room->audio_ingress_fd[FW_MIX]):close(participant->room->audio_egress_fd[FW_MIX]);
@@ -5709,12 +5709,15 @@ static janus_gstr * janus_gst_create_pipeline_audio_mixer( janus_audiocodec acod
 		}
 
                 snprintf(launchString, sizeof(launchString),
-                "udpsrc port=%d timeout=60000000000"
+                "udpsrc port=%d name=udpsrcMixer1 timeout=60000000000"
                 " caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" !"
-		" queue max-size-time=1000000 ! rtpopusdepay ! opusdec ! audioconvert  !  audiomixer name=mix ! audioconvert !" 
-                " audio/x-raw,rate=8000 ! opusenc ! rtspclientsink protocols=3000000 tcp-timeout=3000000 location=\"%s\" latency=0"
-                " udpsrc port=%d timeout=60000000000 caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" ! "
-		" queue max-size-time=1000000 ! rtpopusdepay ! opusdec ! audioconvert ! mix. ",
+		" queue max-size-time=1000000 name=queueMixer1 ! rtpopusdepay name=rtpopusdepayMixer1 ! opusdec name=opusdecMixer1 !"
+                " audioconvert name=audioconvertcMixer1 !  audiomixer name=audiomixerMixer ! audioconvert name=audioconvertcMixer3 !" 
+                " audio/x-raw,rate=8000 ! opusenc ! rtspclientsink name=rtspclientsinkMixer  protocols=GST_RTSP_LOWER_TRANS_TCP "
+                " tcp-timeout=3000000 location=\"%s\" latency=0"
+                " udpsrc name=udpsrcMixer2  port=%d timeout=60000000000 caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" ! "
+		" queue name=queueMixer2 max-size-time=1000000 ! rtpopusdepay  name=rtpopusdepayMixer2  ! opusdec  name=opusdecMixer2 !"
+                " audioconvert name=audioconvertcMixer2 ! mix. ",
                 rtpforwardport_ingress, rtspline_mix, rtpforwardport_egress);
 
 	       	JANUS_LOG (LOG_INFO, "CARBYNE:::::-------MIXER pipeline:\n%s\n",launchString);
@@ -5766,10 +5769,10 @@ static janus_gstr * janus_gst_create_pipeline_audio( janus_audiocodec acodec,
 			}
                 }
                 snprintf(launchString, sizeof(launchString),
-                "udpsrc port=%d "
+                "udpsrc port=%d name=udpsrcAudio"
                 " caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" !"
-                " queue max-size-time=1000000 ! rtpopusdepay ! opusparse ! "
-                " rtspclientsink name=rtspClientSink protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=3000000 location=\"%s\" latency=0",
+                " queue max-size-time=1000000 name=queueAudio ! rtpopusdepay name=rtpopusdepayAudio ! opusparse name=opusparseAudio ! "
+                " rtspclientsink name=rtspClientSinkAudio  protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=3000000 location=\"%s\" latency=0",
                 rtpforwardport, rtspline);
 
                 JANUS_LOG (LOG_INFO, "CARBYNE:::::---try create -%s pipeline:\n%s\n",is_ingress?"INGRESS":"EGRESS",launchString);
@@ -5815,18 +5818,18 @@ static janus_gstr * janus_gst_create_pipeline_video( janus_videocodec vcodec,
         if(vcodec == JANUS_VIDEOCODEC_VP8) {
                 JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------\n");
                 snprintf(launchString, sizeof(launchString),
-                "udpsrc port=%d "
+                "udpsrc port=%d name=udpsrcVideo "
                 " caps=\"application/x-rtp,media=video,encoding-name=VP8\" !"
-                " rtpjitterbuffer ! rtpvp8depay ! queue ! "
-                " rtspclientsink name=rtspClientSink protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
+                " rtpjitterbuffer  name=rtpjitterbufferVideo ! rtpvp8depay name=rtpvp8depayVideo ! queue name=queueVideo ! "
+                " rtspclientsink name=rtspClientSinkVideo  protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
                 rtpforwardport, GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, rtspline);
         } else if (vcodec == JANUS_VIDEOCODEC_H264) {
                 JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------\n");
                 snprintf(launchString, sizeof(launchString),
-                "udpsrc port=%d "
+                "udpsrc port=%d name=udpsrcVideo"
                 " caps=\"application/x-rtp,media=video,clock-rate=90000,profile-level-id=42e01f,encoding-name=H264\" !"
-                " rtph264depay ! h264parse ! "
-                " rtspclientsink name=rtspClientSink protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
+                " rtph264depay name=rtph264depayVideo ! h264parse name=h264parseVideo ! "
+                " rtspclientsink name=rtspClientSinkVideo  protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
                 rtpforwardport,GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, rtspline);
        } else if (vcodec == JANUS_VIDEOCODEC_VP9) {
                JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------\n");
@@ -5912,11 +5915,72 @@ static void * janus_gst_gst_thread_audio_mixer (void * data) {
           usleep(100000); //0.1s
 	 JANUS_LOG (LOG_INFO, "---------------STOP GST MIX AUDIO THREAD WHILE --------- %d %d %d-----\n", 
 			g_atomic_int_get(&room->gstrunIngressAudio), g_atomic_int_get(&room->gstrunEgressAudio), g_atomic_int_get(&room->rtsprunMixerAudio));
-          gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
- 	  JANUS_LOG (LOG_INFO, "---------------STOP GST MIX AUDIO PIPELINE \n");
-          if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
+
+        if(gstr->pipeline) {
+            JANUS_LOG (LOG_INFO, "---------STOP ELEMENTS FROM AUDIO MIXER PIPELINE --------------\n");
+            GstElement * udpsrcMixer1_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "udpsrcMixer1");
+            GstElement * udpsrcMixer2_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "udpsrcMixer2");
+            GstElement * queueMixer1_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "queueMixer1");
+            GstElement * queueMixer2_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "queueMixer2");
+            GstElement * rtpopusdepayMixer1_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtpopusdepayMixer1");
+            GstElement * rtpopusdepayMixer2_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtpopusdepayMixer2");
+            GstElement * opusdecMixer1_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "opusdecMixer1");
+            GstElement * opusdecMixer2_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "opusdecMixer2");
+            GstElement * audioconvertcMixer1_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "audioconvertcMixer1");
+            GstElement * audioconvertcMixer2_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "audioconvertcMixer2");
+            GstElement * audiomixerMixer_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "audiomixerMixer");
+            GstElement * audioconvertcMixer3_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "audioconvertcMixer3");
+            GstElement * rtspclientsinkMixer_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtspclientsinkMixer");
+
+            gst_bin_remove(GST_BIN (gstr->pipeline),udpsrcMixer1_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),udpsrcMixer2_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),queueMixer1_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),queueMixer2_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),rtpopusdepayMixer1_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),rtpopusdepayMixer2_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),opusdecMixer1_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),opusdecMixer2_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),audioconvertcMixer1_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),audioconvertcMixer2_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),audiomixerMixer_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),audioconvertcMixer3_element );
+            gst_bin_remove(GST_BIN (gstr->pipeline),rtspclientsinkMixer_element );
+
+            gst_element_set_state(udpsrcMixer1_element, GST_STATE_NULL);
+            gst_element_set_state(udpsrcMixer2_element, GST_STATE_NULL);
+            gst_element_set_state(queueMixer1_element, GST_STATE_NULL);
+            gst_element_set_state(queueMixer2_element, GST_STATE_NULL);
+            gst_element_set_state(rtpopusdepayMixer1_element, GST_STATE_NULL);
+            gst_element_set_state(rtpopusdepayMixer2_element, GST_STATE_NULL);
+            gst_element_set_state(opusdecMixer1_element, GST_STATE_NULL);
+            gst_element_set_state(opusdecMixer2_element, GST_STATE_NULL);
+            gst_element_set_state(audioconvertcMixer1_element, GST_STATE_NULL);
+            gst_element_set_state(audioconvertcMixer2_element, GST_STATE_NULL);
+            gst_element_set_state(audiomixerMixer_element, GST_STATE_NULL);
+            gst_element_set_state(audioconvertcMixer3_element, GST_STATE_NULL);
+            gst_element_set_state(rtspclientsinkMixer_element, GST_STATE_NULL);
+
+            gst_object_unref(udpsrcMixer1_element);
+            gst_object_unref(udpsrcMixer2_element);
+            gst_object_unref(queueMixer1_element);
+            gst_object_unref(queueMixer2_element);
+            gst_object_unref(rtpopusdepayMixer1_element);
+            gst_object_unref(rtpopusdepayMixer2_element);
+            gst_object_unref(opusdecMixer1_element);
+            gst_object_unref(opusdecMixer2_element);
+            gst_object_unref(audioconvertcMixer1_element);
+            gst_object_unref(audioconvertcMixer2_element);
+            gst_object_unref(audiomixerMixer_element);
+            gst_object_unref(audioconvertcMixer3_element);
+            gst_object_unref(rtspclientsinkMixer_element);
+           JANUS_LOG (LOG_INFO, "---------------TRY TO STOP GST MIX AUDIO PIPELINE... \n");            
+           gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
+           if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
               JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER MIX AUDIO gstr pipelline..!!\n");
-          }
+           }
+          } else {
+              JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER MIX AUDIO gstr pipelline.., PIPELINE NULL !!\n");
+	  }
           gst_object_unref (GST_OBJECT(gstr->pipeline));
           gstr->pipeline = NULL;
           g_free (gstr);
@@ -6014,11 +6078,64 @@ static void * janus_gst_gst_thread_video (void * data) {
                    usleep(50000); //0.05s
           }
           usleep(100000); //0.1s
+       	  if(gstr->pipeline) {
+	     JANUS_LOG (LOG_INFO, "---------------STOP GST VIDEO THREAD WHILE -------%d\n",room->video_rtpforwardport);
+ 	     if(publisher->vcodec == JANUS_VIDEOCODEC_VP8) {
+                JANUS_LOG (LOG_INFO, "---------STOP ELEMENTS FROM JANUS_VIDEOCODEC_VP8 VIDEO PIPELINE --------------\n");
+                GstElement * udpsrcVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "udpsrcVideo");
+                GstElement * rtpjitterbufferVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtpjitterbufferVideo");
+                GstElement * rtpvp8depayVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtpvp8depayVideo");
+                GstElement * queueVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "queueVideo");
+                GstElement * rtspClientSinkVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtspClientSinkVideo");
 
-          JANUS_LOG (LOG_INFO, "---------------STOP GST VIDEO THREAD WHILE -------%d\n",room->video_rtpforwardport);
-          gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
-          if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
-              JANUS_LOG (LOG_ERR, "Unable to stop video  gstr pipelline..!!\n");
+                gst_bin_remove(GST_BIN (gstr->pipeline), udpsrcVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), rtpjitterbufferVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), rtpvp8depayVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), queueVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), rtspClientSinkVideo_element);
+
+                gst_element_set_state(udpsrcVideo_element, GST_STATE_NULL);
+                gst_element_set_state(rtpjitterbufferVideo_element, GST_STATE_NULL);
+                gst_element_set_state(rtpvp8depayVideo_element, GST_STATE_NULL);
+                gst_element_set_state(queueVideo_element, GST_STATE_NULL);
+                gst_element_set_state(rtspClientSinkVideo_element, GST_STATE_NULL);
+
+                gst_object_unref(udpsrcVideo_element);
+                gst_object_unref(rtpjitterbufferVideo_element);
+                gst_object_unref(rtpvp8depayVideo_element);
+                gst_object_unref(queueVideo_element);
+                gst_object_unref(rtspClientSinkVideo_element);
+
+             } else if (publisher->vcodec == JANUS_VIDEOCODEC_H264) {
+                JANUS_LOG (LOG_INFO, "---------STOP ELEMENTS FROM JANUS_VIDEOCODEC_H264 VIDEO PIPELINE --------------\n");
+                GstElement * udpsrcVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "udpsrcVideo");
+                GstElement * rtph264depayVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtph264depayVideo");
+                GstElement * h264parseVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "h264parseVideo");
+                GstElement * rtspclientsinkVideo_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtspclientsinkVideo");
+
+                gst_bin_remove(GST_BIN (gstr->pipeline), udpsrcVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), rtph264depayVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), h264parseVideo_element);
+                gst_bin_remove(GST_BIN (gstr->pipeline), rtspclientsinkVideo_element);
+
+                gst_element_set_state(udpsrcVideo_element, GST_STATE_NULL);
+                gst_element_set_state(rtph264depayVideo_element, GST_STATE_NULL);
+                gst_element_set_state(h264parseVideo_element, GST_STATE_NULL);
+                gst_element_set_state(rtspclientsinkVideo_element, GST_STATE_NULL);
+
+                gst_object_unref(udpsrcVideo_element);
+                gst_object_unref(rtph264depayVideo_element);
+                gst_object_unref(h264parseVideo_element);
+                gst_object_unref(rtspclientsinkVideo_element);
+            }
+            JANUS_LOG (LOG_INFO, "---------------TRY TO STOP GST VIDEO PIPELINE... -------%d\n",room->video_rtpforwardport);
+            gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
+            if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
+                JANUS_LOG (LOG_ERR, "Unable to stop video  gstr pipelline..!!\n");
+            }
+          }
+          else  { 
+              JANUS_LOG (LOG_ERR, "Unable to stop video  gstr pipelline.., PIPELINE NULL !!\n");
           }
           gst_object_unref (GST_OBJECT(gstr->pipeline));
           g_free (gstr);
@@ -6033,7 +6150,7 @@ static void * janus_gst_gst_thread_video (void * data) {
           }
        } while(1);
     }
-    JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD  ----------%d\n",room->video_rtpforwardport);
+    JANUS_LOG (LOG_INFO, "---------------LEAVING GST VIDEO THREAD  ----------%d\n",room->video_rtpforwardport);
     JANUS_LOG (LOG_INFO, "Leaving gstr video pipeline thread..\n");
 
     g_thread_unref (g_thread_self());
@@ -6123,13 +6240,42 @@ static void * janus_gst_gst_thread_audio (void * data) {
                    usleep(50000); //0.05s
           }
           usleep(100000); //0.1s
-
           JANUS_LOG (LOG_INFO, "---------------STOP GST AUDIO THREAD WHILE --------------\n");
-          gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
-          if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
-              JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER AUDIO gstr pipelline..!!\n");
+          if(gstr->pipeline) {
+             JANUS_LOG (LOG_INFO, "---------STOP ELEMENTS FROM AUDIO PIPELINE --------------\n");
+             GstElement * udpsrcAudio_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "udpsrcAudio");
+             GstElement * queueAudio_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "queueAudio");
+             GstElement * rtpopusdepayAudio_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtpopusdepayAudio");
+             GstElement * opusparseAudio_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "opusparseAudio");
+             GstElement * rtspClientSinkAudio_element = gst_bin_get_by_name (GST_BIN (gstr->pipeline), "rtspClientSinkAudio");
+
+             gst_bin_remove(GST_BIN (gstr->pipeline), udpsrcAudio_element);
+             gst_bin_remove(GST_BIN (gstr->pipeline), queueAudio_element );
+             gst_bin_remove(GST_BIN (gstr->pipeline), rtpopusdepayAudio_element);
+             gst_bin_remove(GST_BIN (gstr->pipeline), opusparseAudio_element);
+             gst_bin_remove(GST_BIN (gstr->pipeline), rtspClientSinkAudio_element);
+
+             gst_element_set_state(udpsrcAudio_element, GST_STATE_NULL);
+             gst_element_set_state(queueAudio_element, GST_STATE_NULL);
+             gst_element_set_state(rtpopusdepayAudio_element, GST_STATE_NULL);
+             gst_element_set_state(opusparseAudio_element, GST_STATE_NULL);
+             gst_element_set_state(rtspClientSinkAudio_element, GST_STATE_NULL);
+
+             gst_object_unref(udpsrcAudio_element);
+             gst_object_unref(queueAudio_element);
+             gst_object_unref(rtpopusdepayAudio_element);
+             gst_object_unref(opusparseAudio_element);
+             gst_object_unref(rtspClientSinkAudio_element);
+             JANUS_LOG (LOG_INFO, "---------------TRY TO STOP GST AUDIO THREAD PIPELINE ...\n");
+             gst_element_set_state (gstr->pipeline, GST_STATE_NULL);
+             if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
+                 JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER AUDIO gstr pipelline..!!\n");
+             }
+             gst_object_unref (GST_OBJECT(gstr->pipeline));
+	  }
+          else {
+                JANUS_LOG (LOG_ERR, "Unable to stop GSTREAMER AUDIO gstr pipelline.., PIPELINE IS NULL !!\n");
           }
-          gst_object_unref (GST_OBJECT(gstr->pipeline));
           g_free (gstr);
           session->gstrAudio = NULL;
 
