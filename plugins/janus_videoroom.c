@@ -1808,7 +1808,7 @@ static void janus_videoroom_publisher_free(const janus_refcount *p_ref) {
 	janus_recorder_destroy(p->arc);
 	janus_recorder_destroy(p->vrc);
 	janus_recorder_destroy(p->drc);
-
+JANUS_LOG(LOG_ERR, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
 	if(p->udp_sock > 0)
 		close(p->udp_sock);
 	g_hash_table_destroy(p->rtp_forwarders);
@@ -5134,16 +5134,11 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type me
 								&participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_INGRESS].gstr.mutex:
                                                         	&participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_EGRESS].gstr.mutex);
                                         	JANUS_LOG (LOG_ERR, "wait for AUDIO pipeline , closed by timeout pipeline  leaved \n");
+						break;
                                         }
 					g_mutex_unlock (participant->is_ingress?
                                                         &participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_INGRESS].gstr.mutex:
                                                         &participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_EGRESS].gstr.mutex);
-
-                                        JANUS_LOG (LOG_ERR, "~~~~~~~~~~~~~~~~~~~ AUDIO pipeline ALREADY EXIST ..room:%s port:%d \n",
-                                                     participant->room_id_str,
-						     participant->is_ingress?
-                                                     participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_INGRESS].direct_forward_port:
-                                                     participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_EGRESS].direct_forward_port);
                                 }
                                 JANUS_LOG (LOG_INFO, "...AUDIO pipeline released from cleanup room:%s port:%d\n",
                                                      participant->room_id_str,
@@ -5441,7 +5436,7 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 						json_object_set_new(info, "videoroom", json_string(participant->talking ? "talking" : "stopped-talking"));
 						json_object_set_new(info, "room", string_ids ? json_string(videoroom->room_id_str) : json_integer(videoroom->room_id));
 						json_object_set_new(info, "id", string_ids ? json_string(participant->user_id_str) : json_integer(participant->user_id));
-						json_object_set_new(event, "audio-level-dBov-avg", json_real(audio_dBov_avg));
+						json_object_set_new(info, "audio-level-dBov-avg", json_real(audio_dBov_avg));
 						gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 					}
 				}
