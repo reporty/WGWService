@@ -1460,6 +1460,7 @@ typedef struct janus_gstr {
         GCond      cond;
         GMainLoop *m_mainLoop;
         guint      m_watchID;
+	volatile gint   gst_defined_flag;
 } janus_gstr;
 /*CARBYNE-GST end*/
 typedef enum gst_forward_input_direction{
@@ -1517,8 +1518,7 @@ typedef struct janus_videoroom {
 	janus_refcount ref;			/* Reference counter for this room */
 
 	gboolean is_gst_audiomixer;/*CARBYNE-GST*/
-	volatile gint rtsprunMixerAudio; /*CARBYNE-GST*/
-	janus_gst_thread_parameters  gst_thread_parameters[4];
+	janus_gst_thread_parameters  gst_thread_parameters[GST_FORWARD_MEDIA_TYPE_SIZE];
 } janus_videoroom;
 static GHashTable *rooms;
 static janus_mutex rooms_mutex = JANUS_MUTEX_INITIALIZER;
@@ -5033,7 +5033,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type me
                 janus_mutex_lock(&participant->room->mutex);
                 if( MEDIA_VIDEO == media_type ) {
  			if(participant->room->gst_thread_parameters[GST_MEDIA_VIDEO].direct_forward_port) {
-				while (participant->room->gst_thread_parameters[GST_MEDIA_VIDEO].gstr.pipeline != NULL) {
+				while (g_atomic_int_get(&participant->room->gst_thread_parameters[GST_MEDIA_VIDEO].gstr.gst_defined_flag)) {
 					JANUS_LOG (LOG_ERR, "~~~~~~~~~~~~ VIDEO pipeline ALREADY EXIST .. room:%s port:%d\n",
                 	                                             participant->room_id_str,participant->room->gst_thread_parameters[GST_MEDIA_VIDEO].direct_forward_port);
        					g_mutex_lock (&participant->room->gst_thread_parameters[GST_MEDIA_VIDEO].gstr.mutex);
@@ -5107,8 +5107,8 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type me
 			if ((participant->is_ingress &&   participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_INGRESS].direct_forward_port ) || 
 			    (!participant->is_ingress &&  participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_EGRESS].direct_forward_port)) {
                                 while (g_atomic_int_get(participant->is_ingress?
-						&participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_INGRESS].gst_run_flag:
-						&participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_EGRESS].gst_run_flag)) {
+						&participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_INGRESS].gstr.gst_defined_flag:
+						&participant->room->gst_thread_parameters[GST_MEDIA_AUDIO_EGRESS].gstr.gst_defined_flag)) {
 
 					JANUS_LOG (LOG_ERR, "~~~~~~ AUDIO pipeline ALREADY EXIST .. ..room:%s port:%d \n",
                                                      participant->room_id_str,
@@ -5810,7 +5810,7 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 	JANUS_LOG(LOG_VERB, "Before Join thread ...\n" );
 	g_mutex_lock (&gstr->mutex);
 	end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_SEC + 1 ) * G_TIME_SPAN_SECOND;
-	while (gstr->pipeline) {
+	while ( g_atomic_int_get(&gstr->gst_defined_flag) ) {
 		if (!g_cond_wait_until (&gstr->cond, &gstr->mutex, end_time)) {
         		// timeout has passed.
 			g_mutex_unlock (&gstr->mutex);
@@ -6242,6 +6242,7 @@ static void * janus_gst_gst_thread_runner (void * data) {
 
 
            g_atomic_int_set(&params->gst_run_flag, 1);
+	   g_atomic_int_set(&params->gstr.gst_defined_flag, 1);
 
            g_main_loop_run(params->gstr.m_mainLoop);
 
@@ -6311,6 +6312,7 @@ CLEANUP:
 
 
          JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD -------%s\n",logstr);
+         g_atomic_int_set(&params->gstr.gst_defined_flag, 0);
 
          g_mutex_lock (&params->gstr.mutex);
          g_cond_broadcast (&params->gstr.cond);
