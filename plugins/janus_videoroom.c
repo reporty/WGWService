@@ -1761,6 +1761,8 @@ static gboolean janus_gst_create_pipeline_audio( janus_videoroom*  room,
                                                  guint64 room_id,
                                                  unsigned int* rtpforwardport,
                                                  gboolean is_ingress);
+gboolean  is_all_elements_in_play(janus_gstr *gstr);
+void  set_NULL_exept_rtspClientSink(janus_gstr *gstr);
 /* Freeing stuff */
 static void janus_videoroom_subscriber_destroy(janus_videoroom_subscriber *s) {
 	if(s && g_atomic_int_compare_and_exchange(&s->destroyed, 0, 1))
@@ -6212,6 +6214,81 @@ static void  launch_gst_audiomixer_thread (void *data) {
    }
 }
 
+gboolean  is_all_elements_in_play(janus_gstr *gstr) {
+                gboolean areAllInPlayState;
+                GstIterator *it = gst_bin_iterate_recurse (GST_BIN (gstr->pipeline));
+                GValue item = G_VALUE_INIT;
+                gboolean done = FALSE;
+                g_print("\n-----------------------------\n");
+                while (!done) {
+                        switch ( gst_iterator_next (it, &item)) {
+                                case GST_ITERATOR_OK:
+                                 {
+                                        GstState newState = 0 ;
+                                        GstState pending = 0;
+                                        GstElement *e = (GstElement*)(g_value_peek_pointer(&item));
+                                        gst_element_get_state (e, &newState,&pending, 0);
+                                        JANUS_LOG (LOG_INFO,"\n iterator:  newState:%d  pending:%d  element:%s\n", newState, pending , gst_element_get_name(e));
+                                        if( newState != GST_STATE_PLAYING){
+                                                areAllInPlayState = FALSE;
+                                        }
+                                        break;
+                                }
+                                case GST_ITERATOR_RESYNC:
+                                        gst_iterator_resync (it);
+                                break;
+                                case GST_ITERATOR_ERROR:
+                                        done = TRUE;
+                                break;
+                                case GST_ITERATOR_DONE:
+                                        done = TRUE;
+                                break;
+				default:
+				break;
+                        }
+                }
+return areAllInPlayState;
+}
+
+void  set_NULL_exept_rtspClientSink(janus_gstr *gstr) {
+                GstIterator *it = gst_bin_iterate_elements (GST_BIN (gstr->pipeline));
+                GValue item = G_VALUE_INIT;
+                gboolean done = FALSE;
+                while (!done) {
+                        switch ( gst_iterator_next (it, &item)) {
+                                case GST_ITERATOR_OK:
+                                 {
+                                        GstState newState = 0 ;
+                                        GstState pending = 0;
+                                        GstElement *e = (GstElement*)(g_value_peek_pointer(&item));
+                                        gst_element_get_state (e, &newState,&pending, 0);
+                                        JANUS_LOG (LOG_INFO," iterator:  newState:%d  pending:%d  element:%s\n", newState, pending , gst_element_get_name(e));
+					if(!strncasecmp(gst_element_get_name(e), "rtspClientSink", strlen("rtspClientSink"))) {
+                                            break;
+                                       } else {
+                                            JANUS_LOG (LOG_INFO,"try to change  state of %s  to GST_STATE_NULL\n",
+                                                            gst_element_get_name(e));
+                                            gst_element_set_state(e, GST_STATE_NULL);
+                                            JANUS_LOG (LOG_INFO,"change state succeed !\n");
+                                       }
+	                                break;
+                                }
+                                case GST_ITERATOR_RESYNC:
+                                        gst_iterator_resync (it);
+                                break;
+                                case GST_ITERATOR_ERROR:
+                                        done = TRUE;
+                                break;
+                                case GST_ITERATOR_DONE:
+                                        done = TRUE;
+                                break;
+				default:
+				break;
+                        }
+                }
+return;
+}
+
 static void * janus_gst_gst_thread_runner (void * data) {
     JANUS_LOG (LOG_INFO, "---------------START GST THREAD RUNNER ----\n");
     janus_gst_thread_parameters * params = (janus_gst_thread_parameters *) data;
@@ -6277,8 +6354,14 @@ CLEANUP:
         //  g_mutex_lock (&gstr->mutex);
         if (GST_IS_OBJECT(params->gstr.pipeline))
         {
-        JANUS_LOG (LOG_INFO, "---------------TRY set pipeline to NULL  -------%s\n",logstr);
-        gst_element_set_state (params->gstr.pipeline, GST_STATE_NULL);
+	        JANUS_LOG (LOG_INFO, "---------------TRY set pipeline to NULL  -------%s\n",logstr);
+                 if(is_all_elements_in_play(&params->gstr)) {
+                        JANUS_LOG (LOG_INFO,"   ALL elements are in PLAYING STATE %s\n",logstr);
+			gst_element_set_state (params->gstr.pipeline, GST_STATE_NULL);
+                 } else {
+                        JANUS_LOG (LOG_ERR,"NOT ALL elements are in PLAYING STATE,   call set_NULL_exept_rtspClientSink() %s\n",logstr);
+                        set_NULL_exept_rtspClientSink(&params->gstr);
+                }
         //    if (gst_element_get_state (gstr->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE) == GST_STATE_CHANGE_FAILURE) {
        //         JANUS_LOG (LOG_ERR, "Unable to stop video  gstr pipelline..%s %d !!\n", room->room_id_str, room->video_rtpforwardport);
        //     }
