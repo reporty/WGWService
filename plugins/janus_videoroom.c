@@ -1771,8 +1771,8 @@ static gboolean janus_gst_create_pipeline(forward_media_type media_type,
 						unsigned int *output_rtpforwardport_1,
 						unsigned int *output_rtpforwardport_2);
 
-gboolean is_all_elements_in_play(janus_gstr *gstr);
-void set_NULL_exept_rtspClientSink(janus_gstr *gstr);
+gboolean are_all_elements_in_play(janus_gstr *gstr);
+void set_null_state_except_rtsp_client_sink(janus_gstr *gstr);
 /* Freeing stuff */
 static void janus_videoroom_subscriber_destroy(janus_videoroom_subscriber *s) {
 	if(s && g_atomic_int_compare_and_exchange(&s->destroyed, 0, 1))
@@ -5013,19 +5013,19 @@ admin_response:
 
 gboolean wait_for_pipeline_close(forward_media_type media_type,
 				   janus_videoroom*  room ) {
-	 while (g_atomic_int_get(&room->gst_thread_parameters[media_type].gstr.gst_defined_flag)) {
-		JANUS_LOG (LOG_ERR, "~~~~~~~~~~~~  pipeline ALREADY EXIST room:%s port1:%d port2:%d\n",
+	 while(g_atomic_int_get(&room->gst_thread_parameters[media_type].gstr.gst_defined_flag)) {
+		JANUS_LOG(LOG_ERR, "~~~~~~~~~~~~  pipeline ALREADY EXIST room:%s port1:%d port2:%d\n",
                                   room->room_id_str,
 				  room->gst_thread_parameters[media_type].forward_port_1,
 				  room->gst_thread_parameters[media_type].forward_port_2);
 		g_mutex_lock (&room->gst_thread_parameters[media_type].gstr.mutex);
 		gint64 end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_PLUS_1_SEC) * G_TIME_SPAN_SECOND;
-                if (!g_cond_wait_until (&room->gst_thread_parameters[media_type].gstr.cond,
+                if(!g_cond_wait_until (&room->gst_thread_parameters[media_type].gstr.cond,
                 	                &room->gst_thread_parameters[media_type].gstr.mutex,
                                         end_time)) {
                         	// timeout has passed.
 			g_mutex_unlock (&room->gst_thread_parameters[media_type].gstr.mutex);
-                        JANUS_LOG (LOG_ERR, "wait for pipeline, closed by timeout pipeline  leaved \n");
+                        JANUS_LOG(LOG_ERR, "wait for pipeline, closed by timeout pipeline  leaved \n");
                         break;
 		}
                 g_mutex_unlock (&room->gst_thread_parameters[media_type].gstr.mutex);
@@ -5053,11 +5053,11 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 			if(participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1) {
 				//wait for old pipeline close
 				wait_for_pipeline_close(MEDIA_VIDEO, participant->room);
-		                JANUS_LOG (LOG_INFO, "CARBYNE:::: VIDEO pipeline released from cleanup room:%s port:%d\n",
+		                JANUS_LOG(LOG_INFO, "CARBYNE:::: VIDEO pipeline released from cleanup room:%s port:%d\n",
                                       participant->room_id_str,participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
 			}
                          //Create VIDEO pipeline
-                         JANUS_LOG (LOG_INFO, "CARBYNE:::: VIDEO pipeline will be created  room:%s port:%d\n",
+                         JANUS_LOG(LOG_INFO, "CARBYNE:::: VIDEO pipeline will be created  room:%s port:%d\n",
                                         participant->room_id_str,
                                         participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
 
@@ -5067,7 +5067,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                                                         JANUS_AUDIOCODEC_NONE,
                                                         &participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1,
                                                         NULL)) {
-                                        JANUS_LOG (LOG_ERR, "CARBYNE:::: Invalid gstreamer VIDEO pipeline.. room:%s port:%d\n",
+                                        JANUS_LOG(LOG_ERR, "CARBYNE:::: Invalid gstreamer VIDEO pipeline.. room:%s port:%d\n",
                                         participant->room_id_str,participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
                                         janus_mutex_unlock(&participant->room->mutex);
                                         return FALSE;
@@ -5096,17 +5096,17 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 					//when audio is stay use pipeline
                                 	//wait for old mixer pipeline close
                                 	wait_for_pipeline_close(MEDIA_AUDIO_MIXER, participant->room);
-                                	JANUS_LOG (LOG_INFO, "CARBYNE:::: .AUDIO MIXER pipeline released from cleanup room:%s port:%d port:%d\n",
+                                	JANUS_LOG(LOG_INFO, "CARBYNE:::: .AUDIO MIXER pipeline released from cleanup room:%s port:%d port:%d\n",
                                                 participant->room_id_str,
                                                 participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
                                                 participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
 				}
 			}
 
-                        if( !participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1  &&
-                            !participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2  )  {
+                        if(!participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1  &&
+                           !participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2  )  {
                         	//create MIXER  pipeline and  set both forward ports for Ingress and Egress mixer's udpsrc
-                        	JANUS_LOG (LOG_INFO, "CARBYNE:::: MIXER AUDIO  pipeline will be created  room:%s port:%d port%d\n",
+                        	JANUS_LOG(LOG_INFO, "CARBYNE:::: MIXER AUDIO  pipeline will be created  room:%s port:%d port%d\n",
                                         participant->room_id_str,
                                         participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
                                         participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
@@ -5116,7 +5116,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 								JANUS_AUDIOCODEC_OPUS,
                                                         	&participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
 	                                                        &participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2)) {
-              	        	JANUS_LOG (LOG_ERR, "CARBYNE:::: Invalid gstreamer AUDIO MIXER  pipeline.. room:%s port:%d port%d \n",
+              	        	JANUS_LOG(LOG_ERR, "CARBYNE:::: Invalid gstreamer AUDIO MIXER  pipeline.. room:%s port:%d port%d \n",
                        				participant->room_id_str,
 						participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1 ,
 		 				participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
@@ -5132,10 +5132,10 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 				launch_gst_audiomixer_thread((void*)participant->room); 
 			}
 
-			if (participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1) {
+			if(participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1) {
 					//wait for old pipeline close
 					wait_for_pipeline_close(AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress), participant->room);
-					JANUS_LOG (LOG_INFO, "CARBYNE:::: AUDIO pipeline released from cleanup room:%s port:%d\n",
+					JANUS_LOG(LOG_INFO, "CARBYNE:::: AUDIO pipeline released from cleanup room:%s port:%d\n",
                                       	participant->room_id_str,
 					participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1);
 				}
@@ -5149,7 +5149,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 						   		&participant->room->gst_thread_parameters[MEDIA_AUDIO_INGRESS].forward_port_1:
 						   		&participant->room->gst_thread_parameters[MEDIA_AUDIO_EGRESS].forward_port_1,
 								NULL)) {
-                                	JANUS_LOG (LOG_ERR, "CARBYNE:::: Invalid gstreamer AUDIO pipeline.. room:%s \n", participant->room_id_str);
+                                	JANUS_LOG(LOG_ERR, "CARBYNE:::: Invalid gstreamer AUDIO pipeline.. room:%s \n", participant->room_id_str);
                                 	janus_mutex_unlock(&participant->room->mutex);
                                 	return FALSE;
                         	}
@@ -5666,12 +5666,12 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 static gboolean busCall(GstBus* bus, GstMessage* bus_msg, GMainLoop *loop) {
       GError *bus_err;
       gchar *bus_debug_info;
-      if (bus_msg != NULL) {
-          switch (GST_MESSAGE_TYPE (bus_msg)) {
+      if(bus_msg != NULL) {
+          switch(GST_MESSAGE_TYPE (bus_msg)) {
              case GST_MESSAGE_ERROR:
                 gst_message_parse_error (bus_msg, &bus_err, &bus_debug_info);
-                JANUS_LOG (LOG_ERR, "CARBYNE:: Got GST BUS  error received from element %s: %d (%s) ...\n",GST_OBJECT_NAME (bus_msg->src), bus_err->code, bus_err->message ? bus_err->message : "??");
-                JANUS_LOG (LOG_ERR, "CARBYNE:: GST BUS Debugging information: %s\n", bus_debug_info ? bus_debug_info : "none");
+                JANUS_LOG(LOG_ERR, "CARBYNE:: Got GST BUS  error received from element %s: %d (%s) ...\n",GST_OBJECT_NAME (bus_msg->src), bus_err->code, bus_err->message ? bus_err->message : "??");
+                JANUS_LOG(LOG_ERR, "CARBYNE:: GST BUS Debugging information: %s\n", bus_debug_info ? bus_debug_info : "none");
                 g_clear_error (&bus_err);
                 g_free (bus_debug_info);
                 //g_atomic_int_set(rtspRun,0);
@@ -5680,7 +5680,7 @@ static gboolean busCall(GstBus* bus, GstMessage* bus_msg, GMainLoop *loop) {
                 }
              break;
              case GST_MESSAGE_EOS:
-               JANUS_LOG (LOG_VERB,"CARBYNE:: GST BUS End-Of-Stream reached.\n");
+               JANUS_LOG(LOG_VERB,"CARBYNE:: GST BUS End-Of-Stream reached.\n");
                break;
              case GST_MESSAGE_STATE_CHANGED: {
                GstState oldState;
@@ -5690,19 +5690,19 @@ static gboolean busCall(GstBus* bus, GstMessage* bus_msg, GMainLoop *loop) {
                switch (newState)
                {
                   case GST_STATE_VOID_PENDING:
-                  JANUS_LOG (LOG_VERB,"CARBYNE::GST new state %d VOID_PENDING\n",newState);
+                  JANUS_LOG(LOG_VERB,"CARBYNE::GST new state %d VOID_PENDING\n",newState);
                     break;
                   case GST_STATE_NULL:
-                  JANUS_LOG (LOG_VERB,"CARBYNE::GST new state %d NULL\n",newState);
+                  JANUS_LOG(LOG_VERB,"CARBYNE::GST new state %d NULL\n",newState);
                     break;
                   case GST_STATE_READY:
-                  JANUS_LOG (LOG_VERB,"CARBYNE::GST new state %d READY\n",newState);
+                  JANUS_LOG(LOG_VERB,"CARBYNE::GST new state %d READY\n",newState);
                     break;
                   case GST_STATE_PAUSED:
-                  JANUS_LOG (LOG_VERB,"CARBYNE::GST new state %d PAUSED \n",newState);
+                  JANUS_LOG(LOG_VERB,"CARBYNE::GST new state %d PAUSED \n",newState);
                     break;
                   case GST_STATE_PLAYING:
-                  JANUS_LOG (LOG_VERB,"CARBYNE::GST new state %d PLAYING\n",newState);
+                  JANUS_LOG(LOG_VERB,"CARBYNE::GST new state %d PLAYING\n",newState);
                     break;
                   default:
                      break;
@@ -5710,7 +5710,7 @@ static gboolean busCall(GstBus* bus, GstMessage* bus_msg, GMainLoop *loop) {
                break;
              }
              default:
-                JANUS_LOG (LOG_VERB,"CARBYNE::GST BUS Unexpected message received.\n");
+                JANUS_LOG(LOG_VERB,"CARBYNE::GST BUS Unexpected message received.\n");
              break;
           }
      }
@@ -5719,8 +5719,8 @@ static gboolean busCall(GstBus* bus, GstMessage* bus_msg, GMainLoop *loop) {
 
 static gboolean setBusCall(GstBus* bus, GstMessage* bus_msg, gpointer data) {
       janus_gstr * gstr = (janus_gstr *) data;
-      if (gstr == NULL) {
-         JANUS_LOG (LOG_ERR, "invalid gstr...!\n");
+      if(gstr == NULL) {
+         JANUS_LOG(LOG_ERR, "invalid gstr...!\n");
          return TRUE;
       }
       return busCall( bus, bus_msg, gstr->m_mainLoop);
@@ -5736,13 +5736,13 @@ static gboolean  stopPipelineWithWait(janus_gstr *gstr) {
       }
 
       if (GST_IS_BIN (gstr->pipeline)) {
-            do {
-		areAllInPlayState = is_all_elements_in_play(gstr);
+            do{
+		areAllInPlayState = are_all_elements_in_play(gstr);
                 g_usleep(500000); // 0.5s
-              } while (!areAllInPlayState &&
+              }while (!areAllInPlayState &&
 			(g_get_monotonic_time () < end_time));
         }
-        if (g_main_loop_is_running(gstr->m_mainLoop))
+        if(g_main_loop_is_running(gstr->m_mainLoop))
         {
             g_main_loop_quit(gstr->m_mainLoop);
         }
@@ -5755,17 +5755,17 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 	gint64 end_time;
 
 	if(!stopPipelineWithWait (gstr)) {
-	   JANUS_LOG (LOG_ERR, "Can't close pipeline, internal error, ThreadLeaved \n");
+	   JANUS_LOG(LOG_ERR, "Can't close pipeline, internal error, ThreadLeaved \n");
 	}
 
 	JANUS_LOG(LOG_VERB, "Before Join thread ...\n" );
 	g_mutex_lock (&gstr->mutex);
 	end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_SEC) * G_TIME_SPAN_SECOND;
-	while (g_atomic_int_get(&gstr->gst_defined_flag) ) {
-		if (!g_cond_wait_until (&gstr->cond, &gstr->mutex, end_time)) {
+	while(g_atomic_int_get(&gstr->gst_defined_flag) ) {
+		if(!g_cond_wait_until (&gstr->cond, &gstr->mutex, end_time)) {
         		// timeout has passed.
 			g_mutex_unlock (&gstr->mutex);
-			JANUS_LOG (LOG_ERR, "wait for pipeline , closed by timeout , ThreadLeaved \n");
+			JANUS_LOG(LOG_ERR, "wait for pipeline , closed by timeout , ThreadLeaved \n");
 			gstr->pipeline = NULL;
 			gstr->m_mainLoop = NULL;
 
@@ -5773,7 +5773,7 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 		}
 	}
         g_mutex_unlock (&gstr->mutex);
-	JANUS_LOG (LOG_INFO, "pipeline closed normaly \n");
+	JANUS_LOG(LOG_INFO, "pipeline closed normaly \n");
 }
 
 #define UDPSRC_PORT_PARAMETER_NAME  "port"
@@ -5785,40 +5785,40 @@ static gboolean get_port_from_udpsrc_element(janus_gstr *gstr,
 					    const char *log_string,
 					    unsigned int *rtpforwardport) {
 
-	if (NULL == rtpforwardport) {
-                JANUS_LOG (LOG_ERR, "parameter rtpforwardport is empty\n");
+	if(NULL == rtpforwardport) {
+                JANUS_LOG(LOG_ERR, "parameter rtpforwardport is empty\n");
 		return FALSE;
 	}
 
-        if (NULL == log_string) {
-                JANUS_LOG (LOG_ERR, "parameter log_string is empty\n");
+        if(NULL == log_string) {
+                JANUS_LOG(LOG_ERR, "parameter log_string is empty\n");
                 return FALSE;
         }
 
-        if (NULL == gstr) {
-                JANUS_LOG (LOG_ERR, "parameter gstr is empty %s\n", log_string);
+        if(NULL == gstr) {
+                JANUS_LOG(LOG_ERR, "parameter gstr is empty %s\n", log_string);
                 return FALSE;
         }
 
-	if (NULL == udp_element_name) {
-		JANUS_LOG (LOG_ERR, "parameter udp_element_name is empty %s\n", log_string);
+	if(NULL == udp_element_name) {
+		JANUS_LOG(LOG_ERR, "parameter udp_element_name is empty %s\n", log_string);
 		return FALSE;
 	}
 
 	GstElement * udpsrc_element = gst_bin_get_by_name(GST_BIN (gstr->pipeline), udp_element_name);
 	if(NULL == udpsrc_element) {
-		JANUS_LOG (LOG_ERR, "Not found element %s in pipeline %s\n", udp_element_name, log_string);
+		JANUS_LOG(LOG_ERR, "Not found element %s in pipeline %s\n", udp_element_name, log_string);
 		return FALSE;
 	}
 
 	gst_element_set_state(udpsrc_element, GST_STATE_PAUSED);
 
-        if (gst_element_get_state (udpsrc_element, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
-             JANUS_LOG (LOG_ERR, "Unable to pause udpsrc_element %s\n",log_string);
+        if(gst_element_get_state (udpsrc_element, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
+             JANUS_LOG(LOG_ERR, "Unable to pause udpsrc_element %s\n",log_string);
              return FALSE;
          }
 
-	g_object_get (G_OBJECT (udpsrc_element), UDPSRC_PORT_PARAMETER_NAME, rtpforwardport, NULL);
+	g_object_get(G_OBJECT(udpsrc_element), UDPSRC_PORT_PARAMETER_NAME, rtpforwardport, NULL);
 
 	return TRUE;
 }
@@ -5836,13 +5836,13 @@ static gboolean  janus_gst_create_pipeline(forward_media_type media_type,
         char  rtsp_full_url[JANUS_RTP_FORWARD_STRING_SIZE] = {0};
 
         if(NULL == room) {
-                JANUS_LOG (LOG_ERR, "parameter room is empty\n");
+                JANUS_LOG(LOG_ERR, "parameter room is empty\n");
                 return FALSE;
         }
 
         if(MEDIA_AUDIO_MIXER == media_type) {
                 if((NULL == output_rtpforwardport_1) || (NULL == output_rtpforwardport_2)) {
-                        JANUS_LOG (LOG_ERR, "parameter both ports must be not NULL for MEDIA_AUDIO_MIXER\n");
+                        JANUS_LOG(LOG_ERR, "parameter both ports must be not NULL for MEDIA_AUDIO_MIXER\n");
                         return FALSE;
                 }
         }
@@ -5853,82 +5853,82 @@ static gboolean  janus_gst_create_pipeline(forward_media_type media_type,
 			gstr = &room->gst_thread_parameters[media_type].gstr;
 			if (g_snprintf(log_string, MAX_STRING_LEN,
                                    "AUDIO %s %s", AUDIO_DIRECTION_STRING_FROM_TYPE(media_type), room->room_id_str) < 0) {
-				JANUS_LOG (LOG_ERR, "error write log_string \n");
+				JANUS_LOG(LOG_ERR, "error write log_string \n");
 				return FALSE;
 			}
 			if(g_snprintf(rtsp_full_url, JANUS_RTP_FORWARD_STRING_SIZE,
 				   "%s%s_AUDIO_%s", rtsp_url, AUDIO_DIRECTION_STRING_FROM_TYPE(media_type), room->room_id_str) < 0) {
-                                JANUS_LOG (LOG_ERR, "error write rtsp_full_url \n");
+                                JANUS_LOG(LOG_ERR, "error write rtsp_full_url \n");
                                 return FALSE;
 			}
-                        if(acodec == JANUS_AUDIOCODEC_OPUS) {
+                        if(JANUS_AUDIOCODEC_OPUS == acodec) {
 				if(g_snprintf(launch_string, MAX_STRING_LEN,
 				"udpsrc address=127.0.0.1 port=0 name=%s"
                 		" caps=\"application/x-rtp,media=audio,encoding-name=OPUS\" !"
                 		" queue max-size-time=1000000 name=queueAudio ! rtpopusdepay name=rtpopusdepayAudio ! opusparse name=opusparseAudio ! "
                 		" rtspclientsink name=rtspClientSinkAudio  protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=3000000 location=\"%s\" latency=0",
                			UDPSRC_1_ELEMENT_NAME, rtsp_full_url) < 0) {
-                                	JANUS_LOG (LOG_ERR, "error write launch_string \n");
+                                	JANUS_LOG(LOG_ERR, "error write launch_string \n");
                                 	return FALSE;
 				}
                         }  else {
-                                JANUS_LOG (LOG_ERR, "Unsupported AUDIO codec %d %s\n", acodec, log_string);
+                                JANUS_LOG(LOG_ERR, "Unsupported AUDIO codec %d %s\n", acodec, log_string);
                                 goto CLEANUP;
                         }
 		break;
 		case MEDIA_VIDEO:
 			gstr = &room->gst_thread_parameters[MEDIA_VIDEO].gstr;
                         if(g_snprintf(log_string,MAX_STRING_LEN, "VIDEO %s", room->room_id_str) < 0) {
-                                JANUS_LOG (LOG_ERR, "error write log_string \n");
+                                JANUS_LOG(LOG_ERR, "error write log_string \n");
                                 return FALSE;
 			}
 			if(g_snprintf(rtsp_full_url, JANUS_RTP_FORWARD_STRING_SIZE, "%sVIDEO_%s", rtsp_url,room->room_id_str) < 0) {
-                                JANUS_LOG (LOG_ERR, "error write rtsp_full_url \n");
+                                JANUS_LOG(LOG_ERR, "error write rtsp_full_url \n");
                                 return FALSE;
                         }
 			if(vcodec == JANUS_VIDEOCODEC_VP8) {
-				JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------%s\n",log_string);
+				JANUS_LOG(LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP8 --------------%s\n",log_string);
 				if(g_snprintf(launch_string, MAX_STRING_LEN,
 				"udpsrc address=127.0.0.1 port=0 name=%s "
 				" caps=\"application/x-rtp,media=video,encoding-name=VP8\" !"
 				" rtpjitterbuffer  name=rtpjitterbufferVideo ! rtpvp8depay name=rtpvp8depayVideo ! queue name=queueVideo ! "
 				" rtspclientsink name=rtspClientSinkVideo  protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
                  		UDPSRC_1_ELEMENT_NAME, GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, rtsp_full_url) < 0) {
-                                        JANUS_LOG (LOG_ERR, " error write launch_string \n");
+                                        JANUS_LOG(LOG_ERR, " error write launch_string \n");
                                         return FALSE;
                                 }
-        		} else if (vcodec == JANUS_VIDEOCODEC_H264) {
-                		JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------%s\n",log_string);
+        		} else if(vcodec == JANUS_VIDEOCODEC_H264) {
+                		JANUS_LOG(LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_H264 --------------%s\n",log_string);
                 		if(g_snprintf(launch_string, MAX_STRING_LEN,
                 		"udpsrc address=127.0.0.1 port=0 name=%s"
                 		" caps=\"application/x-rtp,media=video,clock-rate=90000,profile-level-id=42e01f,encoding-name=H264\" !"
                 		" rtph264depay name=rtph264depayVideo ! h264parse name=h264parseVideo ! "
                 		" rtspclientsink name=rtspClientSinkVideo  protocols=GST_RTSP_LOWER_TRANS_TCP tcp-timeout=%d location=\"%s\" latency=0",
                 		UDPSRC_1_ELEMENT_NAME, GST_FAIL_AFTER_TCP_TIMEOUT_MICROSEC, rtsp_full_url) < 0) {
-                                        JANUS_LOG (LOG_ERR, " error write launch_string \n");
+                                        JANUS_LOG(LOG_ERR, " error write launch_string \n");
                                         return FALSE;
                                 }
-			} else if (vcodec == JANUS_VIDEOCODEC_VP9) {
-				JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------%s\n",log_string);
-				JANUS_LOG (LOG_ERR, "Unsupported codec %d %s\n", vcodec, log_string);
+			} else if(vcodec == JANUS_VIDEOCODEC_VP9) {
+				JANUS_LOG(LOG_INFO, "CARBYNE:::::--------------- JANUS_VIDEOCODEC_VP9 --------------%s\n",log_string);
+				JANUS_LOG(LOG_ERR, "Unsupported codec %d %s\n", vcodec, log_string);
 				goto CLEANUP;
 			} else {
-				JANUS_LOG (LOG_ERR, "Unsupported codec %d  %s!!!\n", vcodec,log_string);
+				JANUS_LOG(LOG_ERR, "Unsupported codec %d  %s!!!\n", vcodec,log_string);
 				goto CLEANUP;
          		}
 		break;
 		case MEDIA_AUDIO_MIXER:
 			gstr = &room->gst_thread_parameters[MEDIA_AUDIO_MIXER].gstr;
                         if(g_snprintf(log_string, MAX_STRING_LEN, "AUDIO MIXER %s", room->room_id_str) < 0) {
-				JANUS_LOG (LOG_ERR, "error write log_string \n");
+				JANUS_LOG(LOG_ERR, "error write log_string \n");
                                 return FALSE;
 			}
 			if(g_snprintf(rtsp_full_url, JANUS_RTP_FORWARD_STRING_SIZE, "%sAUDIO_%s", rtsp_url, room->room_id_str) < 0) {
-                                JANUS_LOG (LOG_ERR, "error write rtsp_full_url \n");
+                                JANUS_LOG(LOG_ERR, "error write rtsp_full_url \n");
                                 return FALSE;
                         }
-        		if(acodec == JANUS_AUDIOCODEC_OPUS) {
-                		JANUS_LOG (LOG_INFO, "CARBYNE:::::--------------- JANUS_AUDIOCODEC_OPUS --------------%s\n", log_string);
+        		if(JANUS_AUDIOCODEC_OPUS == acodec) {
+                		JANUS_LOG(LOG_INFO, "CARBYNE:::::--------------- JANUS_AUDIOCODEC_OPUS --------------%s\n", log_string);
                 		/* setup pipeline */
                 		if(g_snprintf(launch_string, MAX_STRING_LEN,
                 		"udpsrc  address=127.0.0.1 port=0  name=%s timeout=60000000000"
@@ -5942,122 +5942,121 @@ static gboolean  janus_gst_create_pipeline(forward_media_type media_type,
                 		" queue name=queueMixer2 max-size-time=1000000 ! rtpopusdepay  name=rtpopusdepayMixer2  ! opusdec  name=opusdecMixer2 !"
                 		" audioconvert name=audioconvertcMixer2 ! audiomixerMixer. ",
                  		UDPSRC_1_ELEMENT_NAME, rtsp_full_url, UDPSRC_2_ELEMENT_NAME) < 0) {
-                                        JANUS_LOG (LOG_ERR, " error write launch_string \n");
+                                        JANUS_LOG(LOG_ERR, "error write launch_string \n");
                                         return FALSE;
                                 }
 		       }else {
-				JANUS_LOG (LOG_ERR, "Unsupported AUDIO codec %d %s\n", acodec, log_string);
+				JANUS_LOG(LOG_ERR, "Unsupported AUDIO codec %d %s\n", acodec, log_string);
               			goto CLEANUP;
         		}
 			break;
 			default:
-				JANUS_LOG (LOG_ERR, "---------------WRONG GST FORWARD MEDIA TYPE  -----%d--%s\n",media_type, log_string);
+				JANUS_LOG(LOG_ERR, "---------------WRONG GST FORWARD MEDIA TYPE  -----%d--%s\n",media_type, log_string);
                 	break;
         }
 
-        JANUS_LOG (LOG_INFO, "CARBYNE:::::------%s pipeline:\n%s\n",log_string, launch_string);
+        JANUS_LOG(LOG_INFO, "CARBYNE:::::------%s pipeline:\n%s\n",log_string, launch_string);
 
         if(NULL != gstr->pipeline)   {
-                JANUS_LOG (LOG_ERR, "=============  pipelie already exist =====  %s!!!\n", log_string);
+                JANUS_LOG(LOG_ERR, "=============  pipelie already exist =====  %s!!!\n", log_string);
          }
 
 	gstr->pipeline = gst_parse_launch(launch_string, &error);
 
 	if(NULL == gstr->pipeline) {
-		JANUS_LOG (LOG_ERR,"Pipeline creation failed could not continue %s\n", log_string);
+		JANUS_LOG(LOG_ERR,"Pipeline creation failed could not continue %s\n", log_string);
 		goto CLEANUP;
 	}
 
 	if(error) {
-		JANUS_LOG (LOG_ERR,"Unable to build pipeline: %s %s\n", error->message, log_string);
+		JANUS_LOG(LOG_ERR,"Unable to build pipeline: %s %s\n", error->message, log_string);
 	        g_clear_error(&error);
 		goto CLEANUP;
        }
 	g_clear_error(&error);
 
         if(!get_port_from_udpsrc_element(gstr, UDPSRC_1_ELEMENT_NAME, log_string, output_rtpforwardport_1)) {
-		JANUS_LOG (LOG_ERR,"Unable to get port from pipeline: %s\n", log_string);
+		JANUS_LOG(LOG_ERR,"Unable to get port from pipeline: %s\n", log_string);
 		goto CLEANUP;
         }
 
 	if(MEDIA_AUDIO_MIXER == media_type) {
 		if(!get_port_from_udpsrc_element(gstr, UDPSRC_2_ELEMENT_NAME, log_string, output_rtpforwardport_2)) {
-                	JANUS_LOG (LOG_ERR,"Unable to get port from pipeline: %s\n", log_string);
+                	JANUS_LOG(LOG_ERR,"Unable to get port from pipeline: %s\n", log_string);
 			goto CLEANUP;
 		}
 	}
 
 
-	if (NULL != output_rtpforwardport_1) {
-        	JANUS_LOG (LOG_INFO,"CARBYNE: allocated  port : %d %s\n", *output_rtpforwardport_1, log_string);
+	if(NULL != output_rtpforwardport_1) {
+        	JANUS_LOG(LOG_INFO,"CARBYNE: allocated  port : %d %s\n", *output_rtpforwardport_1, log_string);
 	}
-        if (NULL != output_rtpforwardport_2) {
-                JANUS_LOG (LOG_INFO,"CARBYNE: allocated  port : %d %s\n", *output_rtpforwardport_2, log_string);
+        if(NULL != output_rtpforwardport_2) {
+                JANUS_LOG(LOG_INFO,"CARBYNE: allocated  port : %d %s\n", *output_rtpforwardport_2, log_string);
         }
 
         gstr->m_mainLoop = g_main_loop_new(NULL, FALSE);
-	if (NULL == gstr->m_mainLoop) {
-		JANUS_LOG (LOG_ERR,"failed to create g_main_loop_newh %s\n", log_string);
+	if(NULL == gstr->m_mainLoop) {
+		JANUS_LOG(LOG_ERR,"failed to create g_main_loop_newh %s\n", log_string);
 		goto CLEANUP;
 	}
 
         GstBus *bus = gst_pipeline_get_bus (GST_PIPELINE (gstr->pipeline));
-        if (NULL == bus) {
-                JANUS_LOG (LOG_ERR,"failed to create bus %s\n", log_string);
+        if(NULL == bus) {
+                JANUS_LOG(LOG_ERR,"failed to create bus %s\n", log_string);
                 goto CLEANUP;
         }
         gstr->m_watchID =gst_bus_add_watch (bus, setBusCall, gstr); 
         gst_object_unref (bus);
         if(0 == gstr->m_watchID) {
-                JANUS_LOG (LOG_ERR,"failed to add  bus watch %s\n", log_string);
+                JANUS_LOG(LOG_ERR,"failed to add  bus watch %s\n", log_string);
                 goto CLEANUP;
       	}
 
       return TRUE;
 
 CLEANUP:
-	if (0 != gstr->m_watchID) {
-		JANUS_LOG (LOG_INFO, "---------------TRY remove watchID  THREAD -------%s\n",log_string);
+	if(0 != gstr->m_watchID) {
+		JANUS_LOG(LOG_INFO, "---------------TRY remove watchID  THREAD -------%s\n",log_string);
 		g_source_remove(gstr->m_watchID);
 		gstr->m_watchID = 0;
         }
 
-        if (NULL != gstr->pipeline && GST_OBJECT_REFCOUNT_VALUE(gstr->pipeline) > 0) {
-		JANUS_LOG (LOG_INFO, "---------------TRY unref pipeline  THREAD  -------%s\n",log_string);
+        if(NULL != gstr->pipeline && GST_OBJECT_REFCOUNT_VALUE(gstr->pipeline) > 0) {
+		JANUS_LOG(LOG_INFO, "---------------TRY unref pipeline  THREAD  -------%s\n",log_string);
 		gst_object_unref(gstr->pipeline);
 		gstr->pipeline = NULL;
         }
 
-	if (NULL != gstr->m_mainLoop && GST_OBJECT_REFCOUNT_VALUE(gstr->m_mainLoop) > 0) {
-		JANUS_LOG (LOG_INFO, "---------------TRY unref loop THREAD  -------%s\n",log_string);
+	if(NULL != gstr->m_mainLoop && GST_OBJECT_REFCOUNT_VALUE(gstr->m_mainLoop) > 0) {
+		JANUS_LOG(LOG_INFO, "---------------TRY unref loop THREAD  -------%s\n",log_string);
 		g_main_loop_unref(gstr->m_mainLoop);
 		gstr->m_mainLoop = NULL;
 	}
 	return FALSE;
 }
 
-/*CARBYNE-GST-end*/
 static void  launch_gst_video_thread (void *data) {
-
-    JANUS_LOG (LOG_INFO, "---------------START GST VIDEO THREAD LAUNCHER -------------\n");
+    JANUS_LOG(LOG_INFO, "---------------START GST VIDEO THREAD LAUNCHER -------------\n");
     janus_videoroom_session * session = (janus_videoroom_session *) data;
-    if (session == NULL) {
-         JANUS_LOG (LOG_ERR, "invalid session!\n");
+    if(session == NULL) {
+        JANUS_LOG(LOG_ERR, "invalid session!\n");
         g_thread_unref (g_thread_self());
-        return ;
+        return;
     }
+
     janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
-    if (publisher == NULL) {
-         JANUS_LOG (LOG_ERR, "invalid publisher!\n");
+    if(publisher == NULL) {
+        JANUS_LOG(LOG_ERR, "invalid publisher!\n");
         g_thread_unref (g_thread_self());
-        return ;
+        return;
     }
 
     janus_videoroom *room = publisher->room;
-    if (room  == NULL) {
-         JANUS_LOG (LOG_ERR, "invalid room!\n");
+    if(room  == NULL) {
+        JANUS_LOG(LOG_ERR, "invalid room!\n");
         g_thread_unref (g_thread_self());
-        return ;
+        return;
     }
 
     room->gst_thread_parameters[MEDIA_VIDEO].media_type = MEDIA_VIDEO;
@@ -6065,43 +6064,42 @@ static void  launch_gst_video_thread (void *data) {
     g_snprintf(room->gst_thread_parameters[MEDIA_VIDEO].logstr, 255, "VIDEO %s:%d",
 			publisher->room_id_str,
 			room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
-     JANUS_LOG (LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",room->gst_thread_parameters[MEDIA_VIDEO].logstr);
-    if (session->is_gst) {
+    JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",room->gst_thread_parameters[MEDIA_VIDEO].logstr);
+    if(session->is_gst) {
        GError *error = NULL;
        g_thread_try_new ("gstvideo", &janus_gst_gst_thread_runner, &room->gst_thread_parameters[MEDIA_VIDEO], &error);
 
-       if (error != NULL) {
-               JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer VIDEO  thread...\n",
+       if(error != NULL) {
+               JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the gstreamer VIDEO  thread...\n",
                        error->code, error->message ? error->message : "??");
 
-               return ;
+               return;
        }
        g_clear_error(&error);
    }
 }
 
 static void  launch_gst_audio_thread (void *data) {
-
-    JANUS_LOG (LOG_INFO, "---------------START GST AUDIO THREAD LAUNCHER-------------\n");
+    JANUS_LOG(LOG_INFO, "---------------START GST AUDIO THREAD LAUNCHER-------------\n");
     janus_videoroom_session * session = (janus_videoroom_session *) data;
-    if (session == NULL) {
-        JANUS_LOG (LOG_ERR, "invalid parameter session\n");
+    if(session == NULL) {
+        JANUS_LOG(LOG_ERR, "invalid parameter session\n");
         g_thread_unref (g_thread_self());
-        return ;
+        return;
     }
 
     janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
-    if (publisher == NULL) {
-        JANUS_LOG (LOG_ERR, "invalid publisher in the session\n");
+    if(publisher == NULL) {
+        JANUS_LOG(LOG_ERR, "invalid publisher in the session\n");
         g_thread_unref (g_thread_self());
-        return ;
+        return;
     }
 
     janus_videoroom *room = publisher->room;
-    if (room  == NULL) {
-        JANUS_LOG (LOG_ERR, "invalid room in the publisher\n");
+    if(room  == NULL) {
+        JANUS_LOG(LOG_ERR, "invalid room in the publisher\n");
         g_thread_unref (g_thread_self());
-        return ;
+        return;
     }
 
     room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS].media_type =
@@ -6114,15 +6112,15 @@ static void  launch_gst_audio_thread (void *data) {
                 publisher->is_ingress?room->gst_thread_parameters[MEDIA_AUDIO_INGRESS].forward_port_1:
                                       room->gst_thread_parameters[MEDIA_AUDIO_EGRESS].forward_port_1);
 
-    JANUS_LOG (LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",
+    JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",
     room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS].logstr);
-    if (session->is_gst) {
+    if(session->is_gst) {
        GError *error = NULL;
        g_thread_try_new ("gstaudio", &janus_gst_gst_thread_runner, 
 			&room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS], &error);
 
-       if (error != NULL) {
-           JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer AUDIO  thread...\n",
+       if(error != NULL) {
+           JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the gstreamer AUDIO  thread...\n",
                       error->code, error->message ? error->message : "??");
            return ;
        }
@@ -6131,10 +6129,10 @@ static void  launch_gst_audio_thread (void *data) {
 }
 
 static void  launch_gst_audiomixer_thread (void *data) {
-	JANUS_LOG (LOG_INFO, "---------------START GST AUDIO MIXER THREAD LAUNCHER -------------\n");
+	JANUS_LOG(LOG_INFO, "---------------START GST AUDIO MIXER THREAD LAUNCHER -------------\n");
 	janus_videoroom * room = (janus_videoroom*) data;
-	if (room == NULL) {
-		JANUS_LOG (LOG_ERR, "invalid room!\n");
+	if(room == NULL) {
+		JANUS_LOG(LOG_ERR, "invalid room!\n");
 		g_thread_unref (g_thread_self());
 		return ;
 	}
@@ -6143,12 +6141,12 @@ static void  launch_gst_audiomixer_thread (void *data) {
 	g_snprintf(room->gst_thread_parameters[MEDIA_AUDIO_MIXER].logstr, 255, "MIXER AUDIO %s:%d:%d",room->room_id_str,
                         				room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1 ,
                                                         room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
-	JANUS_LOG (LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",room->gst_thread_parameters[MEDIA_AUDIO_MIXER].logstr);
-	if (room->is_gst_audiomixer) {
+	JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",room->gst_thread_parameters[MEDIA_AUDIO_MIXER].logstr);
+	if(room->is_gst_audiomixer) {
 		GError *error = NULL;
 		g_thread_try_new ("gstaudiomixer", &janus_gst_gst_thread_runner, &room->gst_thread_parameters[MEDIA_AUDIO_MIXER], &error);
-		if (error != NULL) {
-			JANUS_LOG (LOG_ERR, "Got error %d (%s) trying to launch the gstreamer AUDIO MIXER thread...\n",
+		if(error != NULL) {
+			JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the gstreamer AUDIO MIXER thread...\n",
 			error->code, error->message ? error->message : "??");
 			return ;
 		}
@@ -6156,7 +6154,7 @@ static void  launch_gst_audiomixer_thread (void *data) {
 	}
 }
 
-gboolean  is_all_elements_in_play(janus_gstr *gstr) {
+gboolean  are_all_elements_in_play(janus_gstr *gstr) {
 	if(NULL == gstr) {
 		JANUS_LOG(LOG_ERR,"gstr is NULL, Memory error..\n");
 		return FALSE;
@@ -6169,7 +6167,7 @@ gboolean  is_all_elements_in_play(janus_gstr *gstr) {
         }
 	GValue item = G_VALUE_INIT;
 	gboolean done = FALSE;
-	while (!done) {
+	while(!done) {
 		switch(gst_iterator_next(it, &item)) {
 			case GST_ITERATOR_OK:
 			{
@@ -6177,8 +6175,8 @@ gboolean  is_all_elements_in_play(janus_gstr *gstr) {
 				GstState pending = 0;
 				GstElement *e = (GstElement*)(g_value_peek_pointer(&item));
 				gst_element_get_state (e, &newState,&pending, 0);
-				JANUS_LOG (LOG_INFO,"iterator: newState:%d pending:%d  element:%s\n", newState, pending , gst_element_get_name(e));
-				if( newState != GST_STATE_PLAYING) {
+				JANUS_LOG(LOG_INFO,"iterator: newState:%d pending:%d  element:%s\n", newState, pending , gst_element_get_name(e));
+				if(newState != GST_STATE_PLAYING) {
 					areAllInPlayState = FALSE;
 				}
 				break;
@@ -6201,7 +6199,7 @@ gboolean  is_all_elements_in_play(janus_gstr *gstr) {
 	return areAllInPlayState;
 }
 
-void  set_NULL_exept_rtspClientSink(janus_gstr *gstr) {
+void  set_null_state_except_rtsp_client_sink(janus_gstr *gstr) {
         if(NULL == gstr) {
                 JANUS_LOG(LOG_ERR,"gstr is NULL, Memory error..\n");
                 return;
@@ -6221,14 +6219,14 @@ void  set_NULL_exept_rtspClientSink(janus_gstr *gstr) {
 				GstState pending = 0;
 				GstElement *e = (GstElement*)(g_value_peek_pointer(&item));
 				gst_element_get_state (e, &newState,&pending, 0);
-				JANUS_LOG (LOG_INFO," iterator:  newState:%d  pending:%d  element:%s\n", newState, pending , gst_element_get_name(e));
+				JANUS_LOG(LOG_INFO," iterator:  newState:%d  pending:%d  element:%s\n", newState, pending , gst_element_get_name(e));
 				if(!strncasecmp(gst_element_get_name(e), "rtspClientSink", strlen("rtspClientSink"))) {
 					break;
 				} else {
-					JANUS_LOG (LOG_INFO,"try to change state of %s to GST_STATE_NULL\n",
+					JANUS_LOG(LOG_INFO,"try to change state of %s to GST_STATE_NULL\n",
 					gst_element_get_name(e));
 					gst_element_set_state(e, GST_STATE_NULL);
-					JANUS_LOG (LOG_INFO,"change state succeed !\n");
+					JANUS_LOG(LOG_INFO,"change state succeed !\n");
 				}
 				break;
 			}
@@ -6251,26 +6249,26 @@ void  set_NULL_exept_rtspClientSink(janus_gstr *gstr) {
 }
 
 static void * janus_gst_gst_thread_runner (void * data) {
-	JANUS_LOG (LOG_INFO, "---------------START GST THREAD RUNNER ----\n");
+	JANUS_LOG(LOG_INFO, "---------------START GST THREAD RUNNER ----\n");
 	janus_gst_thread_parameters * params = (janus_gst_thread_parameters *) data;
-	if (params == NULL) {
-		JANUS_LOG (LOG_ERR, "invalid thread params !\n");
+	if(params == NULL) {
+		JANUS_LOG(LOG_ERR, "invalid thread params !\n");
 		g_thread_unref (g_thread_self());
         	return NULL;
 	}
 	forward_media_type media_type =  params->media_type;
 	char logstr[MAX_STRING_LEN];
     	if(g_snprintf(logstr, MAX_STRING_LEN, "%s",params->logstr) < 0 ) {
-		JANUS_LOG (LOG_ERR, "error write logstr \n");
+		JANUS_LOG(LOG_ERR, "error write logstr \n");
         	 g_thread_unref (g_thread_self());
                 return NULL;
         }
-	JANUS_LOG (LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  BEFORE RECONNECT  LOOP-------%s\n",logstr);
+	JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  BEFORE RECONNECT  LOOP-------%s\n",logstr);
     	do {
 		gst_element_set_state (params->gstr.pipeline, GST_STATE_PLAYING);
 
-		if (gst_element_get_state (params->gstr.pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
-			JANUS_LOG (LOG_ERR, "Unable to play  pipeline..! -------%s\n",logstr);
+		if(gst_element_get_state (params->gstr.pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
+			JANUS_LOG(LOG_ERR, "Unable to play  pipeline..! -------%s\n",logstr);
 			goto CLEANUP;
            	}
 
@@ -6279,16 +6277,16 @@ static void * janus_gst_gst_thread_runner (void * data) {
 		g_main_loop_run(params->gstr.m_mainLoop);
 
 		if(g_atomic_int_get(&params->gst_run_flag)) {
-			JANUS_LOG (LOG_INFO, "---------------RESTART GST THREAD RUNNER RECONNECT LOOP  -------%s %d\n",logstr,
+			JANUS_LOG(LOG_INFO, "---------------RESTART GST THREAD RUNNER RECONNECT LOOP  -------%s %d\n",logstr,
 		        		      g_atomic_int_get(&params->gst_run_flag));
           	} else {
-			JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD RUNNER RECONNECT LOOP -------%s %d\n",logstr,
+			JANUS_LOG(LOG_INFO, "---------------LEAVING GST THREAD RUNNER RECONNECT LOOP -------%s %d\n",logstr,
                                     g_atomic_int_get(&params->gst_run_flag));
                		break;
           	}
 	} while(1);
 
-	JANUS_LOG (LOG_INFO, "---------------before CLEANUP  GST THREAD RUNNER -------%s\n",logstr);
+	JANUS_LOG(LOG_INFO, "---------------before CLEANUP  GST THREAD RUNNER -------%s\n",logstr);
 CLEANUP:
     {
         switch(media_type) {
@@ -6302,40 +6300,40 @@ CLEANUP:
           		params->forward_port_2 = 0 ;
         	break;
 		default:
-		 JANUS_LOG (LOG_ERR, "---------------WRONG GST FORWARD MEDIA TYPE  -------%s\n",logstr);
+			JANUS_LOG(LOG_ERR, "---------------WRONG GST FORWARD MEDIA TYPE  -------%s\n",logstr);
 		break;
 	}
-        if (GST_IS_OBJECT(params->gstr.pipeline)) {
-	        JANUS_LOG (LOG_INFO, "---------------TRY set pipeline to NULL  -------%s\n",logstr);
-                 if(is_all_elements_in_play(&params->gstr)) {
-                        JANUS_LOG (LOG_INFO,"ALL elements are in PLAYING STATE %s\n",logstr);
+        if(GST_IS_OBJECT(params->gstr.pipeline)) {
+	        JANUS_LOG(LOG_INFO, "---------------TRY set pipeline to NULL  -------%s\n",logstr);
+                 if(are_all_elements_in_play(&params->gstr)) {
+                        JANUS_LOG(LOG_INFO,"ALL elements are in PLAYING STATE %s\n",logstr);
 			gst_element_set_state (params->gstr.pipeline, GST_STATE_NULL);
                  } else {
-                        JANUS_LOG (LOG_ERR,"NOT ALL elements are in PLAYING STATE,   call set_NULL_exept_rtspClientSink() %s\n",logstr);
-                        set_NULL_exept_rtspClientSink(&params->gstr);
+                        JANUS_LOG(LOG_ERR,"NOT ALL elements are in PLAYING STATE, call set_null_state_except_rtsp_client_sink() %s\n",logstr);
+                        set_null_state_except_rtsp_client_sink(&params->gstr);
                 }
         }
 
         if (0 != params->gstr.m_watchID) {
-	    JANUS_LOG (LOG_INFO, "---------------TRY remove watchID  THREAD -------%s\n",logstr);
+	    JANUS_LOG(LOG_INFO, "---------------TRY remove watchID  THREAD -------%s\n",logstr);
             g_source_remove(params->gstr.m_watchID);
             params->gstr.m_watchID = 0;
         }
 
         if (NULL != params->gstr.pipeline && GST_OBJECT_REFCOUNT_VALUE(params->gstr.pipeline) > 0) {
-           JANUS_LOG (LOG_INFO, "---------------TRY unref pipeline  THREAD  -------%s\n",logstr);
+           JANUS_LOG(LOG_INFO, "---------------TRY unref pipeline  THREAD  -------%s\n",logstr);
             gst_object_unref(params->gstr.pipeline);
             params->gstr.pipeline = NULL;
         }
 
         if (NULL != params->gstr.m_mainLoop && GST_OBJECT_REFCOUNT_VALUE(params->gstr.m_mainLoop) > 0) {
-        JANUS_LOG (LOG_INFO, "---------------TRY unref loop THREAD  -------%s\n",logstr);
+        JANUS_LOG(LOG_INFO, "---------------TRY unref loop THREAD  -------%s\n",logstr);
             g_main_loop_unref(params->gstr.m_mainLoop);
             params->gstr.m_mainLoop = NULL;
         }
 
 
-         JANUS_LOG (LOG_INFO, "---------------LEAVING GST THREAD -------%s\n",logstr);
+         JANUS_LOG(LOG_INFO, "---------------LEAVING GST THREAD -------%s\n",logstr);
          g_atomic_int_set(&params->gstr.gst_defined_flag, 0);
 
          g_mutex_lock (&params->gstr.mutex);
