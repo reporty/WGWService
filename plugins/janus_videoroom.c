@@ -1467,6 +1467,23 @@ typedef enum  forward_media_type {
              return FALSE;\
 	 } \
        } while(0);
+#define IS_PARAM_IN_LIMITS_RETURN_VOID(expression, str, lower_bound, high_bound)  \
+        do { \
+          int i=expression;\
+          if((i >= high_bound) && (i <= lower_bound)) { \
+             JANUS_LOG(LOG_ERR, "error write %s \n", str);\
+             return;\
+         } \
+       } while(0);
+#define IS_PARAM_IN_LIMITS_RETURN_NULL(expression, str, lower_bound, high_bound)  \
+        do { \
+          int i=expression;\
+          if((i >= high_bound) && (i <= lower_bound)) { \
+             JANUS_LOG(LOG_ERR, "error write %s \n", str);\
+             return NULL;\
+         } \
+       } while(0);
+
 typedef struct janus_gstr {
 	GstElement * pipeline;
 	GMutex     mutex;
@@ -5153,9 +5170,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 								participant->room,
 								JANUS_VIDEOCODEC_NONE,
 								participant->acodec,
-                                  				participant->is_ingress?
-						   		&participant->room->gst_thread_parameters[MEDIA_AUDIO_INGRESS].forward_port_1:
-						   		&participant->room->gst_thread_parameters[MEDIA_AUDIO_EGRESS].forward_port_1,
+			   		&participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1,
 								NULL)) {
                                 	JANUS_LOG(LOG_ERR, "CARBYNE:::: Invalid gstreamer AUDIO pipeline.. room:%s \n", participant->room_id_str);
                                 	janus_mutex_unlock(&participant->room->mutex);
@@ -6055,9 +6070,10 @@ static void launch_gst_video_thread(void *data) {
 
     room->gst_thread_parameters[MEDIA_VIDEO].media_type = MEDIA_VIDEO;
 
-    g_snprintf(room->gst_thread_parameters[MEDIA_VIDEO].logstr, 255, "VIDEO %s:%d",
+    IS_PARAM_IN_LIMITS_RETURN_VOID(g_snprintf(room->gst_thread_parameters[MEDIA_VIDEO].logstr, MAX_STRING_LEN, "VIDEO %s:%d",
 			publisher->room_id_str,
-			room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
+			room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1),
+			"logstr", 0, MAX_STRING_LEN);
     JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",room->gst_thread_parameters[MEDIA_VIDEO].logstr);
     if(session->is_gst) {
        GError *error = NULL;
@@ -6098,12 +6114,13 @@ static void  launch_gst_audio_thread (void *data) {
     room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS].media_type =
 							 publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS;
 
-    g_snprintf(room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS].logstr,
-	        255,
+    IS_PARAM_IN_LIMITS_RETURN_VOID(g_snprintf(room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS].logstr,
+	        MAX_STRING_LEN,
 		"%s AUDIO  %s:%d",AUDIO_DIRECTION_STRING_FROM_BOOL(publisher->is_ingress), 
 		publisher->room_id_str,
                 publisher->is_ingress?room->gst_thread_parameters[MEDIA_AUDIO_INGRESS].forward_port_1:
-                                      room->gst_thread_parameters[MEDIA_AUDIO_EGRESS].forward_port_1);
+                                      room->gst_thread_parameters[MEDIA_AUDIO_EGRESS].forward_port_1),
+		"logstr", 0, MAX_STRING_LEN);
 
     JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",
     room->gst_thread_parameters[publisher->is_ingress?MEDIA_AUDIO_INGRESS:MEDIA_AUDIO_EGRESS].logstr);
@@ -6131,9 +6148,10 @@ static void  launch_gst_audiomixer_thread (void *data) {
 	}
 	janus_refcount_increase(&room->ref);
 	room->gst_thread_parameters[MEDIA_AUDIO_MIXER].media_type = MEDIA_AUDIO_MIXER;
-	g_snprintf(room->gst_thread_parameters[MEDIA_AUDIO_MIXER].logstr, 255, "MIXER AUDIO %s:%d:%d",room->room_id_str,
+	IS_PARAM_IN_LIMITS_RETURN_VOID(g_snprintf(room->gst_thread_parameters[MEDIA_AUDIO_MIXER].logstr, MAX_STRING_LEN, "MIXER AUDIO %s:%d:%d",room->room_id_str,
                         				room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1 ,
-                                                        room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
+                                                        room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2),
+	"logstr", 0, MAX_STRING_LEN);
 	JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----%s\n",room->gst_thread_parameters[MEDIA_AUDIO_MIXER].logstr);
 	if(room->is_gst_audiomixer) {
 		GError *error = NULL;
@@ -6246,15 +6264,14 @@ static void * janus_gst_thread_runner (void * data) {
 	janus_gst_thread_parameters * params = (janus_gst_thread_parameters *) data;
 	if(params == NULL) {
 		JANUS_LOG(LOG_ERR, "invalid thread params !\n");
-		g_thread_unref (g_thread_self());
         	return NULL;
 	}
 	forward_media_type media_type =  params->media_type;
 	char logstr[MAX_STRING_LEN];
-    	if(g_snprintf(logstr, MAX_STRING_LEN, "%s",params->logstr) < 0 ) {
+    	gint ret_val =g_snprintf(logstr, MAX_STRING_LEN, "%s",params->logstr);
+	if((ret_val <= 0) || (MAX_STRING_LEN <= ret_val)) {
 		JANUS_LOG(LOG_ERR, "error write logstr \n");
-        	 g_thread_unref (g_thread_self());
-                return NULL;
+                goto CLEANUP;
         }
 	JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  BEFORE RECONNECT  LOOP-------%s\n",logstr);
     	do {
@@ -9110,7 +9127,10 @@ static gboolean janus_auth_check_signature(const char *token, const char *room) 
   /* prepare message for compare with signature  */
     char message[XL_BUFFER_SIZE];
     memset(message,0,XL_BUFFER_SIZE * sizeof(char));
-    g_snprintf(message, XL_BUFFER_SIZE,"%s:%s:%s",(char*)room,(char*)parts[0],(char*)parts[1]);
+    gint ret_val = g_snprintf(message, XL_BUFFER_SIZE,"%s:%s:%s",(char*)room,(char*)parts[0],(char*)parts[1]);
+    if((ret_val <= 0) || ( XL_BUFFER_SIZE <= ret_val )) {
+        goto fail;
+    }
     JANUS_LOG(LOG_INFO, "janus_videoroom: auth: message of  token:%s \n", message);
     /* Verify HMAC-SHA256 */
     unsigned char signature[EVP_MAX_MD_SIZE] = { 0 };
