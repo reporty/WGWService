@@ -5050,8 +5050,8 @@ gboolean wait_for_pipeline_close(forward_media_type media_type,
                                         end_time)) {
                         	// timeout has passed.
 			g_mutex_unlock (&room->gst_thread_parameters[media_type].gstr.mutex);
-                        JANUS_LOG(LOG_ERR, "wait for pipeline, closed by timeout pipeline  leaved \n");
-                        break;
+                        JANUS_LOG(LOG_ERR, "wait for pipeline, closed by timeout, pipeline-leaved \n");
+                        return FALSE;
 		}
                 g_mutex_unlock (&room->gst_thread_parameters[media_type].gstr.mutex);
 	}
@@ -5077,9 +5077,14 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 if(PUBLISHER_MEDIA_VIDEO == media_type ) {
 			if(participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1) {
 				//wait for old pipeline close
-				wait_for_pipeline_close(MEDIA_VIDEO, participant->room);
-		                JANUS_LOG(LOG_INFO, "CARBYNE:::: VIDEO pipeline released from cleanup room:%s port:%d\n",
-                                      participant->room_id_str,participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
+				if(wait_for_pipeline_close(MEDIA_VIDEO, participant->room)) {
+			                JANUS_LOG(LOG_INFO, "CARBYNE:::: VIDEO pipeline released from cleanup room:%s port:%d\n",
+        		                          participant->room_id_str,participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
+				}else {
+					JANUS_LOG(LOG_ERR, "CARBYNE:::: VIDEO pipeline leaved, cleanup failed room:%s port:%d\n",
+                                                  participant->room_id_str,participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
+				}
+
 			}
                          //Create VIDEO pipeline
                          JANUS_LOG(LOG_INFO, "CARBYNE:::: VIDEO pipeline will be created  room:%s port:%d\n",
@@ -5120,11 +5125,17 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 			  	 (!participant->is_ingress && participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2)) {
 					//when audio is stay use pipeline
                                 	//wait for old mixer pipeline close
-                                	wait_for_pipeline_close(MEDIA_AUDIO_MIXER, participant->room);
-                                	JANUS_LOG(LOG_INFO, "CARBYNE:::: .AUDIO MIXER pipeline released from cleanup room:%s port:%d port:%d\n",
-                                                participant->room_id_str,
-                                                participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
-                                                participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
+                                	if(wait_for_pipeline_close(MEDIA_AUDIO_MIXER, participant->room)) {
+                                		JANUS_LOG(LOG_INFO, "CARBYNE:::: .AUDIO MIXER pipeline released from cleanup room:%s port:%d port:%d\n",
+                                                	participant->room_id_str,
+                                                	participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
+                                                	participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
+					}else {
+                                        	JANUS_LOG(LOG_ERR, "CARBYNE:::: AUDIO MIXER pipeline leaved, cleanup failed room:%s port:%d port:%d\n",
+                                                        participant->room_id_str,
+                                                        participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
+                                                        participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
+                                	}
 				}
 			}
 
@@ -5159,10 +5170,15 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 
 			if(participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1) {
 					//wait for old pipeline close
-					wait_for_pipeline_close(AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress), participant->room);
-					JANUS_LOG(LOG_INFO, "CARBYNE:::: AUDIO pipeline released from cleanup room:%s port:%d\n",
-                                      	participant->room_id_str,
-					participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1);
+					if(wait_for_pipeline_close(AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress), participant->room)) {
+						JANUS_LOG(LOG_INFO, "CARBYNE:::: AUDIO pipeline released from cleanup room:%s port:%d\n",
+                                      		   participant->room_id_str,
+					           participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1); 
+                                	}else {
+                                        	JANUS_LOG(LOG_ERR, "CARBYNE:::: AUDIO pipeline leaved, cleanup failed room:%s port:%d\n",
+                                                  participant->room_id_str,
+                                                  participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1);
+                                	}
 				}
 
 				// create direct AUDIO  (ingress or egrees) pipeline and forward port udpsrc 
@@ -5782,21 +5798,21 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 	}
 
 	JANUS_LOG(LOG_VERB, "Before Join thread ...\n" );
-	g_mutex_lock (&gstr->mutex);
 	end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_SEC) * G_TIME_SPAN_SECOND;
 	while(g_atomic_int_get(&gstr->gst_defined_flag) ) {
+		g_mutex_lock (&gstr->mutex);
 		if(!g_cond_wait_until (&gstr->cond, &gstr->mutex, end_time)) {
         		// timeout has passed.
 			g_mutex_unlock (&gstr->mutex);
 			JANUS_LOG(LOG_ERR, "wait for pipeline , closed by timeout , ThreadLeaved \n");
 			gstr->pipeline = NULL;
 			gstr->m_mainLoop = NULL;
-
 			return;
 		}
+	        g_mutex_unlock (&gstr->mutex);
 	}
-        g_mutex_unlock (&gstr->mutex);
 	JANUS_LOG(LOG_INFO, "pipeline closed normaly \n");
+	return;
 }
 
 #define UDPSRC_PORT_PARAMETER_NAME  "port"
