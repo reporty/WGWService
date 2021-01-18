@@ -5050,8 +5050,8 @@ gboolean wait_for_pipeline_close(forward_media_type media_type,
                                         end_time)) {
                         	// timeout has passed.
 			g_mutex_unlock (&room->gst_thread_parameters[media_type].gstr.mutex);
-                        JANUS_LOG(LOG_ERR, "wait for pipeline, closed by timeout pipeline  leaved \n");
-                        break;
+                        JANUS_LOG(LOG_ERR, "wait for pipeline, closed by timeout, pipeline-leaved \n");
+                        return FALSE;
 		}
                 g_mutex_unlock (&room->gst_thread_parameters[media_type].gstr.mutex);
 	}
