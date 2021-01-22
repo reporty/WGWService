@@ -1491,6 +1491,7 @@ typedef struct janus_gstr {
 	GMainLoop *m_mainLoop;
 	guint      m_watchID;
 	volatile gint   gst_defined_flag;
+	GMutex     stop_mutex;
 } janus_gstr;
 
 /*CARBYNE-GST end*/
@@ -5830,11 +5831,11 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 {
 	janus_gstr *gstr = (janus_gstr*)data;
 	gint64 end_time;
-
+ 	g_mutex_lock (&gstr->stop_mutex);//prevent stop , before start
 	if(!stopPipelineWithWait (gstr)) {
 	   JANUS_LOG(LOG_ERR, "Can't close pipeline, internal error, ThreadLeaved \n");
 	}
-
+	 g_mutex_unlock (&gstr->stop_mutex);//prevent stop , before start
 	JANUS_LOG(LOG_VERB, "Before Join thread ...\n" );
 	end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_SEC) * G_TIME_SPAN_SECOND;
 	while(g_atomic_int_get(&gstr->gst_defined_flag) ) {
@@ -6337,6 +6338,7 @@ static void * janus_gst_thread_runner (void * data) {
         }
 	JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  BEFORE RECONNECT  LOOP-------%s\n",logstr);
     	do {
+		g_mutex_lock(&params->gstr.stop_mutex);//prevent stop , before start
   		g_atomic_int_set(&params->gst_run_flag, 1);
 		g_atomic_int_set(&params->gstr.gst_defined_flag, 1);
 		//if(MEDIA_AUDIO_MIXER != media_type) {
@@ -6349,29 +6351,35 @@ static void * janus_gst_thread_runner (void * data) {
                                 			// timeout has passed.
                         		g_mutex_unlock (&params->first_frame_mutex);
                       	  		JANUS_LOG(LOG_ERR, "wait for the first frame, closed by timeout, close the thread  %s\n",logstr);
+					 g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
                         		goto CLEANUP;
                 		}
                 		g_mutex_unlock (&params->first_frame_mutex);
 			}
 			if(!g_atomic_int_get(&params->gst_run_flag)) {
 				JANUS_LOG(LOG_ERR, "--------------first frame received, but pipeline already in closing state  %s\n",logstr);
+				g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
 				goto CLEANUP;
 			}
 		//}
-		janus_mutex_lock(&rooms_mutex);
+//		janus_mutex_lock(&rooms_mutex);
 		JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  SET GST_STATE_PLAYING-------%s\n",logstr);
 		if(GST_STATE_CHANGE_FAILURE == gst_element_set_state (params->gstr.pipeline, GST_STATE_PLAYING)) { 
 		        JANUS_LOG(LOG_ERR, "Unable to set play state for pipeline..! -------%s\n",logstr);
+			g_mutex_unlock (&params->gstr.stop_mutex);
                         goto CLEANUP;
 		}
 		if(gst_element_get_state (params->gstr.pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
 			JANUS_LOG(LOG_ERR, "Unable to play pipeline..! -------%s\n",logstr);
+			g_mutex_unlock (&params->gstr.stop_mutex);
 			goto CLEANUP;
            	}
-		janus_mutex_unlock(&rooms_mutex);
+//		janus_mutex_unlock(&rooms_mutex);
 
-
-		g_main_loop_run(params->gstr.m_mainLoop);
+		g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
+		if(g_atomic_int_get(&params->gst_run_flag)) {
+			g_main_loop_run(params->gstr.m_mainLoop);
+		}
 
 		if(g_atomic_int_get(&params->gst_run_flag)) {
 			JANUS_LOG(LOG_INFO, "---------------RESTART GST THREAD RUNNER RECONNECT LOOP  -------%s %d\n",logstr,
@@ -6386,6 +6394,7 @@ static void * janus_gst_thread_runner (void * data) {
 	JANUS_LOG(LOG_INFO, "---------------before CLEANUP  GST THREAD RUNNER -------%s\n",logstr);
 CLEANUP:
     {
+	g_mutex_lock (&params->gstr.stop_mutex);//prevent stop , before start
         switch(media_type) {
 		case MEDIA_AUDIO_INGRESS:
         	case MEDIA_AUDIO_EGRESS:
@@ -6426,6 +6435,7 @@ CLEANUP:
 
 
          JANUS_LOG(LOG_INFO, "---------------LEAVING GST THREAD -------%s\n",logstr);
+	 g_atomic_int_set(&params->gst_run_flag, 0);
          g_atomic_int_set(&params->gstr.gst_defined_flag, 0);
          g_atomic_int_set(&params->first_frame_flag_processed, 0);
 
@@ -6435,6 +6445,7 @@ CLEANUP:
 
          g_thread_unref(g_thread_self());
      }
+     g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
      return NULL;
 }
 /*CARBYNE-GST-end*/
