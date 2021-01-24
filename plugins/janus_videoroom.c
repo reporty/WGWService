@@ -1490,7 +1490,8 @@ typedef struct janus_gstr {
 	GCond      cond;
 	GMainLoop *m_mainLoop;
 	guint      m_watchID;
-	volatile gint   gst_defined_flag;
+	volatile gint gst_started_flag;
+	volatile gint gst_defined_flag;
 	GMutex     stop_mutex;
 } janus_gstr;
 
@@ -5832,6 +5833,7 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 	janus_gstr *gstr = (janus_gstr*)data;
 	gint64 end_time;
  	g_mutex_lock (&gstr->stop_mutex);//prevent stop , before start
+	g_atomic_int_set(&gstr->gst_started_flag, 0);
 	if(!stopPipelineWithWait (gstr)) {
 	   JANUS_LOG(LOG_ERR, "Can't close pipeline, internal error, ThreadLeaved \n");
 	}
@@ -6017,6 +6019,8 @@ static gboolean janus_gst_create_pipeline(forward_media_type media_type,
                 	break;
         }
 
+        g_atomic_int_set(&gstr->gst_started_flag, 0);
+
         JANUS_LOG(LOG_INFO, "CARBYNE:::::------%s pipeline:\n%s\n",log_string, launch_string);
 
         if(NULL != gstr->pipeline) {
@@ -6075,6 +6079,7 @@ static gboolean janus_gst_create_pipeline(forward_media_type media_type,
                 JANUS_LOG(LOG_ERR,"failed to add  bus watch %s\n", log_string);
                 goto CLEANUP;
       	}
+      g_atomic_int_set(&gstr->gst_started_flag, 1);
       return TRUE;
 
 CLEANUP:
@@ -6377,7 +6382,7 @@ static void * janus_gst_thread_runner (void * data) {
 //		janus_mutex_unlock(&rooms_mutex);
 
 		g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
-		if(g_atomic_int_get(&params->gst_run_flag)) {
+		if(g_atomic_int_get(&params->gstr.gst_started_flag) && g_atomic_int_get(&params->gst_run_flag)) {
 			g_main_loop_run(params->gstr.m_mainLoop);
 		}
 
@@ -6437,6 +6442,7 @@ CLEANUP:
          JANUS_LOG(LOG_INFO, "---------------LEAVING GST THREAD -------%s\n",logstr);
 	 g_atomic_int_set(&params->gst_run_flag, 0);
          g_atomic_int_set(&params->gstr.gst_defined_flag, 0);
+	 g_atomic_int_set(&params->gstr.gst_started_flag, 0);
          g_atomic_int_set(&params->first_frame_flag_processed, 0);
 
          g_mutex_lock(&params->gstr.mutex);
