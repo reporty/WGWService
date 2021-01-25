@@ -6346,40 +6346,38 @@ static void * janus_gst_thread_runner (void * data) {
 		g_mutex_lock(&params->gstr.stop_mutex);//prevent stop , before start
   		g_atomic_int_set(&params->gst_run_flag, 1);
 		g_atomic_int_set(&params->gstr.gst_defined_flag, 1);
-		//if(MEDIA_AUDIO_MIXER != media_type) {
-			while(!g_atomic_int_get(&params->first_frame_flag_processed)) {
-                		g_mutex_lock (&params->first_frame_mutex);
-                		gint64 end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_PLUS_1_SEC) * G_TIME_SPAN_SECOND;
-                		if(!g_cond_wait_until (&params->first_frame_cond,
-                        		               &params->first_frame_mutex,
-                                		       end_time)) {
-                                			// timeout has passed.
-                        		g_mutex_unlock (&params->first_frame_mutex);
-                      	  		JANUS_LOG(LOG_ERR, "wait for the first frame, closed by timeout, close the thread  %s\n",logstr);
-					 g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
-                        		goto CLEANUP;
+		while(!g_atomic_int_get(&params->first_frame_flag_processed)) {
+               		g_mutex_lock (&params->first_frame_mutex);
+               		gint64 end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_PLUS_1_SEC) * G_TIME_SPAN_SECOND;
+               		if(!g_cond_wait_until (&params->first_frame_cond,
+                       		               &params->first_frame_mutex,
+                               		       end_time)) {
+                               			// timeout has passed.
+                       		g_mutex_unlock (&params->first_frame_mutex);
+               	  		JANUS_LOG(LOG_ERR, "wait for the first frame, closed by timeout, close the thread  %s\n",logstr);
+				 g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
+                       		goto CLEANUP;
                 		}
-                		g_mutex_unlock (&params->first_frame_mutex);
-			}
-			if(!g_atomic_int_get(&params->gst_run_flag)) {
-				JANUS_LOG(LOG_ERR, "--------------first frame received, but pipeline already in closing state  %s\n",logstr);
-				g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
-				goto CLEANUP;
-			}
-		//}
-//		janus_mutex_lock(&rooms_mutex);
+               		g_mutex_unlock (&params->first_frame_mutex);
+		}
+		if(!g_atomic_int_get(&params->gst_run_flag)) {
+			JANUS_LOG(LOG_ERR, "--------------first frame received, but pipeline already in closing state  %s\n",logstr);
+			g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
+			goto CLEANUP;
+		}
+
 		JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  SET GST_STATE_PLAYING-------%s\n",logstr);
 		if(GST_STATE_CHANGE_FAILURE == gst_element_set_state (params->gstr.pipeline, GST_STATE_PLAYING)) { 
 		        JANUS_LOG(LOG_ERR, "Unable to set play state for pipeline..! -------%s\n",logstr);
 			g_mutex_unlock (&params->gstr.stop_mutex);
                         goto CLEANUP;
 		}
+
 		if(gst_element_get_state (params->gstr.pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
 			JANUS_LOG(LOG_ERR, "Unable to play pipeline..! -------%s\n",logstr);
 			g_mutex_unlock (&params->gstr.stop_mutex);
 			goto CLEANUP;
            	}
-//		janus_mutex_unlock(&rooms_mutex);
 
 		g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
 		if(g_atomic_int_get(&params->gstr.gst_started_flag) && g_atomic_int_get(&params->gst_run_flag)) {
@@ -8775,7 +8773,14 @@ static void *janus_videoroom_handler(void *data) {
 				/* Unless this is an update, in which case schedule a new offer for all viewers */
 				if(sdp_update) {   /*CARBYNE-MIXA*/
 					JANUS_LOG(LOG_WARN, "[%s-%p]Add AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, msg->handle,session);
-                                        participant->is_ingress = TRUE;
+                                        if (!strcmp(participant->user_id_str,participant->room_id_str)) {
+                                                JANUS_LOG(LOG_WARN, "sdp_update: Set Publisher INGRESS \n");
+                                                participant->is_ingress = TRUE;
+                                        }
+                                        else {
+                                                JANUS_LOG(LOG_WARN, "sdp_update: Set Publisher EGRESS \n");
+                                                participant->is_ingress = FALSE;
+                                        }
                                         forward_media(session, PUBLISHER_MEDIA_AUDIO);
 
 					JANUS_LOG(LOG_WARN, "--------------------------------------------\n");
