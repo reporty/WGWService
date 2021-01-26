@@ -1490,7 +1490,9 @@ typedef struct janus_gstr {
 	GCond      cond;
 	GMainLoop *m_mainLoop;
 	guint      m_watchID;
-	volatile gint   gst_defined_flag;
+	volatile gint gst_started_flag;
+	volatile gint gst_defined_flag;
+	GMutex     stop_mutex;
 } janus_gstr;
 
 /*CARBYNE-GST end*/
@@ -2340,6 +2342,7 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 			/*CARBYNE-AUDIO*/
                 	for (int media_type_counter=0; media_type_counter < FORWARD_MEDIA_TYPE_SIZE; media_type_counter++ ) {
 				g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gst_run_flag,0);
+        			g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gstr.gst_started_flag, 0);
 				g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].first_frame_flag_processed,0);
 				videoroom->gst_thread_parameters[media_type_counter].forward_port_1 = 0;
 				videoroom->gst_thread_parameters[media_type_counter].forward_port_2 = 0;
@@ -3266,6 +3269,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		/*CARBYNE-AUDIO*/
                 for (int media_type_counter=0; media_type_counter < FORWARD_MEDIA_TYPE_SIZE; media_type_counter ++ ) {
 			g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gst_run_flag,0);
+                        g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gstr.gst_started_flag, 0);
 			g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].first_frame_flag_processed,0);
 			videoroom->gst_thread_parameters[media_type_counter].forward_port_1 = 0;
 			videoroom->gst_thread_parameters[media_type_counter].forward_port_2 = 0;
@@ -5076,10 +5080,19 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 }
         }
 
-        JANUS_LOG(LOG_WARN, "CARBYNE:::: forward_media: Publisher is  %s \n",AUDIO_DIRECTION_STRING_FROM_BOOL(participant->is_ingress));
+        JANUS_LOG(LOG_INFO, "CARBYNE:::: forward_media: Publisher is  %s \n",AUDIO_DIRECTION_STRING_FROM_BOOL(participant->is_ingress));
         if (participant->room) {
                 janus_mutex_lock(&participant->room->mutex);
                 if(PUBLISHER_MEDIA_VIDEO == media_type ) {
+
+                	if(g_atomic_int_get(&participant->room->gst_thread_parameters[MEDIA_VIDEO].gstr.gst_started_flag)) {
+                        	JANUS_LOG(LOG_ERR, "CARBYNE:::: VIDEO pipeline already running  room:%s port:%d\n",
+                                	                participant->room_id_str,
+                                        	        participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
+                        	janus_mutex_unlock(&participant->room->mutex);
+                        	return FALSE;
+                	}
+
 			if(participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1) {
 				//wait for old pipeline close
 				if(wait_for_pipeline_close(MEDIA_VIDEO, participant->room)) {
@@ -5122,7 +5135,14 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 }
 
                 if(PUBLISHER_MEDIA_AUDIO == media_type) {
-
+                	if(g_atomic_int_get(
+				&participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].gstr.gst_started_flag)) {
+                        	JANUS_LOG(LOG_ERR, "CARBYNE:::: AUDIO pipeline already running %s port:%d\n",
+                                                   participant->room_id_str,
+                                                   participant->room->gst_thread_parameters[AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress)].forward_port_1);
+                        	janus_mutex_unlock(&participant->room->mutex);
+                        	return FALSE;
+                	}
 			if((participant->is_ingress && !participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2) ||
 			  (!participant->is_ingress && !participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1)) {
 				//when no second audio in mixere
@@ -5310,48 +5330,47 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			}
                         /*CARBYNE-RF-start*/
 
-                        JANUS_LOG(LOG_WARN, "Publisher: audio %d, video %d,   \n",participant->audio, participant->video);
-                        JANUS_LOG(LOG_WARN, "Publisher: audio_pt %u, video_pt %u,   \n",participant->audio_pt, participant->video_pt);
+                        JANUS_LOG(LOG_INFO, "Publisher: audio %d, video %d,   \n",participant->audio, participant->video);
+                        JANUS_LOG(LOG_INFO, "Publisher: audio_pt %u, video_pt %u,   \n",participant->audio_pt, participant->video_pt);
                         /*******************************************/
 			if(string_ids) {
 				if(participant->audio) {
-					JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Publisher   AUDIO!!!:-- publisher %s\n", participant->user_id_str);
+					JANUS_LOG(LOG_INFO, "janus_videoroom_setup_media: Publisher   AUDIO!!!:-- publisher %s\n", participant->user_id_str);
 				}
 				if(participant->video) {
-					JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Publisher    VIDEO!!!:--publisher  %s\n", participant->user_id_str);
+					JANUS_LOG(LOG_INFO, "janus_videoroom_setup_media: Publisher    VIDEO!!!:--publisher  %s\n", participant->user_id_str);
 				}
-                                if (!strcmp(participant->user_id_str,participant->room_id_str))
-                                {
-					JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Set Publisher INGRESS \n");
+                                if (!strcmp(participant->user_id_str,participant->room_id_str)) {
+					JANUS_LOG(LOG_INFO, "janus_videoroom_setup_media: Set Publisher INGRESS \n");
                                         participant->is_ingress = TRUE;
                                 }
                                 else {
-                                        JANUS_LOG(LOG_WARN, "janus_videoroom_setup_media: Set Publisher EGRESS \n");
+                                        JANUS_LOG(LOG_INFO, "janus_videoroom_setup_media: Set Publisher EGRESS \n");
                                         participant->is_ingress = FALSE;
                                 }
 
             		}
 			else {
                 		if(participant->audio) {
-                    			JANUS_LOG(LOG_WARN, "Publisher   AUDIO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
+                    			JANUS_LOG(LOG_INFO, "Publisher   AUDIO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
                 		}
                 		if(participant->video) {
-                        		JANUS_LOG(LOG_WARN, "Publisher    VIDEO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
+                        		JANUS_LOG(LOG_INFO, "Publisher    VIDEO!!!:----------------------------------- publisher  (%"SCNu64")\n", participant->user_id);
                 		}
                 		if (participant->user_id == participant->room_id) {
-                                        JANUS_LOG(LOG_WARN, "Set Publisher INGRESS \n");
+                                        JANUS_LOG(LOG_INFO, "Set Publisher INGRESS \n");
                     			participant->is_ingress = TRUE;
                 		}
                 		else {
-                                        JANUS_LOG(LOG_WARN, "Set Publisher EGRESS \n");
+                                        JANUS_LOG(LOG_INFO, "Set Publisher EGRESS \n");
                     			participant->is_ingress = FALSE;
                		 	}
             		}
                         if(participant->audio && ! participant->video) {
-				JANUS_LOG(LOG_WARN, "[%s-%p]AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
+				JANUS_LOG(LOG_INFO, "[%s-%p]AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
                         }
 			else {
-				JANUS_LOG(LOG_WARN, "[%s-%p]VIDEO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
+				JANUS_LOG(LOG_INFO, "[%s-%p]VIDEO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, handle,session);
 			}
 
 			/*CARBYNE:  Forward Support for Audio started with video */
@@ -5830,11 +5849,12 @@ static void thread_stopper_callback(gpointer data, gpointer user_data)
 {
 	janus_gstr *gstr = (janus_gstr*)data;
 	gint64 end_time;
-
+ 	g_mutex_lock (&gstr->stop_mutex);//prevent stop , before start
+	g_atomic_int_set(&gstr->gst_started_flag, 0);
 	if(!stopPipelineWithWait (gstr)) {
 	   JANUS_LOG(LOG_ERR, "Can't close pipeline, internal error, ThreadLeaved \n");
 	}
-
+	 g_mutex_unlock (&gstr->stop_mutex);//prevent stop , before start
 	JANUS_LOG(LOG_VERB, "Before Join thread ...\n" );
 	end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_SEC) * G_TIME_SPAN_SECOND;
 	while(g_atomic_int_get(&gstr->gst_defined_flag) ) {
@@ -6016,6 +6036,8 @@ static gboolean janus_gst_create_pipeline(forward_media_type media_type,
                 	break;
         }
 
+        g_atomic_int_set(&gstr->gst_started_flag, 0);
+
         JANUS_LOG(LOG_INFO, "CARBYNE:::::------%s pipeline:\n%s\n",log_string, launch_string);
 
         if(NULL != gstr->pipeline) {
@@ -6074,6 +6096,7 @@ static gboolean janus_gst_create_pipeline(forward_media_type media_type,
                 JANUS_LOG(LOG_ERR,"failed to add  bus watch %s\n", log_string);
                 goto CLEANUP;
       	}
+      g_atomic_int_set(&gstr->gst_started_flag, 1);
       return TRUE;
 
 CLEANUP:
@@ -6337,41 +6360,46 @@ static void * janus_gst_thread_runner (void * data) {
         }
 	JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  BEFORE RECONNECT  LOOP-------%s\n",logstr);
     	do {
+		g_mutex_lock(&params->gstr.stop_mutex);//prevent stop , before start
   		g_atomic_int_set(&params->gst_run_flag, 1);
 		g_atomic_int_set(&params->gstr.gst_defined_flag, 1);
-		//if(MEDIA_AUDIO_MIXER != media_type) {
-			while(!g_atomic_int_get(&params->first_frame_flag_processed)) {
-                		g_mutex_lock (&params->first_frame_mutex);
-                		gint64 end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_PLUS_1_SEC) * G_TIME_SPAN_SECOND;
-                		if(!g_cond_wait_until (&params->first_frame_cond,
-                        		               &params->first_frame_mutex,
-                                		       end_time)) {
-                                			// timeout has passed.
-                        		g_mutex_unlock (&params->first_frame_mutex);
-                      	  		JANUS_LOG(LOG_ERR, "wait for the first frame, closed by timeout, close the thread  %s\n",logstr);
-                        		goto CLEANUP;
+		while(!g_atomic_int_get(&params->first_frame_flag_processed)) {
+               		g_mutex_lock (&params->first_frame_mutex);
+               		gint64 end_time = g_get_monotonic_time () + (TIME_FOR_WAIT_FOR_PIPELINE_PLUS_1_SEC) * G_TIME_SPAN_SECOND;
+               		if(!g_cond_wait_until (&params->first_frame_cond,
+                       		               &params->first_frame_mutex,
+                               		       end_time)) {
+                               			// timeout has passed.
+                       		g_mutex_unlock (&params->first_frame_mutex);
+               	  		JANUS_LOG(LOG_ERR, "wait for the first frame, closed by timeout, close the thread  %s\n",logstr);
+				 g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
+                       		goto CLEANUP;
                 		}
-                		g_mutex_unlock (&params->first_frame_mutex);
-			}
-			if(!g_atomic_int_get(&params->gst_run_flag)) {
-				JANUS_LOG(LOG_ERR, "--------------first frame received, but pipeline already in closing state  %s\n",logstr);
-				goto CLEANUP;
-			}
-		//}
-		janus_mutex_lock(&rooms_mutex);
+               		g_mutex_unlock (&params->first_frame_mutex);
+		}
+		if(!g_atomic_int_get(&params->gst_run_flag)) {
+			JANUS_LOG(LOG_ERR, "--------------first frame received, but pipeline already in closing state  %s\n",logstr);
+			g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
+			goto CLEANUP;
+		}
+
 		JANUS_LOG(LOG_INFO, "CARBYNE:::::---------------GST THREAD RUNNER  SET GST_STATE_PLAYING-------%s\n",logstr);
 		if(GST_STATE_CHANGE_FAILURE == gst_element_set_state (params->gstr.pipeline, GST_STATE_PLAYING)) { 
 		        JANUS_LOG(LOG_ERR, "Unable to set play state for pipeline..! -------%s\n",logstr);
+			g_mutex_unlock (&params->gstr.stop_mutex);
                         goto CLEANUP;
 		}
+
 		if(gst_element_get_state (params->gstr.pipeline, NULL, NULL, GST_WAIT_TIMEOUT_FROM_IDLE_TO_PLAY_NSEC) == GST_STATE_CHANGE_FAILURE) {
 			JANUS_LOG(LOG_ERR, "Unable to play pipeline..! -------%s\n",logstr);
+			g_mutex_unlock (&params->gstr.stop_mutex);
 			goto CLEANUP;
            	}
-		janus_mutex_unlock(&rooms_mutex);
 
-
-		g_main_loop_run(params->gstr.m_mainLoop);
+		g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
+		if(g_atomic_int_get(&params->gstr.gst_started_flag) && g_atomic_int_get(&params->gst_run_flag)) {
+			g_main_loop_run(params->gstr.m_mainLoop);
+		}
 
 		if(g_atomic_int_get(&params->gst_run_flag)) {
 			JANUS_LOG(LOG_INFO, "---------------RESTART GST THREAD RUNNER RECONNECT LOOP  -------%s %d\n",logstr,
@@ -6386,6 +6414,7 @@ static void * janus_gst_thread_runner (void * data) {
 	JANUS_LOG(LOG_INFO, "---------------before CLEANUP  GST THREAD RUNNER -------%s\n",logstr);
 CLEANUP:
     {
+	g_mutex_lock (&params->gstr.stop_mutex);//prevent stop , before start
         switch(media_type) {
 		case MEDIA_AUDIO_INGRESS:
         	case MEDIA_AUDIO_EGRESS:
@@ -6426,6 +6455,7 @@ CLEANUP:
 
 
          JANUS_LOG(LOG_INFO, "---------------LEAVING GST THREAD -------%s\n",logstr);
+	 g_atomic_int_set(&params->gst_run_flag, 0);
          g_atomic_int_set(&params->gstr.gst_defined_flag, 0);
          g_atomic_int_set(&params->first_frame_flag_processed, 0);
 
@@ -6435,6 +6465,7 @@ CLEANUP:
 
          g_thread_unref(g_thread_self());
      }
+     g_mutex_unlock (&params->gstr.stop_mutex);//prevent stop , before start
      return NULL;
 }
 /*CARBYNE-GST-end*/
@@ -6790,7 +6821,7 @@ void janus_videoroom_hangup_media(janus_plugin_session *handle) {
 	janus_refcount_decrease(&session->ref);
 
 	/*CARBYNE-LOGIC end patch */
-	JANUS_LOG(LOG_ERR, "End of janus_videoroom_hangup_media \n"); /*CARBYNE*/
+	JANUS_LOG(LOG_INFO, "End of janus_videoroom_hangup_media \n"); /*CARBYNE*/
 }
 
 static void janus_videoroom_hangup_subscriber(janus_videoroom_subscriber * s) {
@@ -6917,7 +6948,7 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 	}
 	g_atomic_int_set(&session->hangingup, 0);
 
-       JANUS_LOG(LOG_ERR, "End of janus_videoroom_hangup_media_internal \n"); /*CARBYNE*/
+       JANUS_LOG(LOG_INFO, "End of janus_videoroom_hangup_media_internal \n"); /*CARBYNE*/
 }
 
 /* Thread to handle incoming messages */
@@ -8757,8 +8788,15 @@ static void *janus_videoroom_handler(void *data) {
 				}
 				/* Unless this is an update, in which case schedule a new offer for all viewers */
 				if(sdp_update) {   /*CARBYNE-MIXA*/
-					JANUS_LOG(LOG_WARN, "[%s-%p]Add AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, msg->handle,session);
-                                        participant->is_ingress = TRUE;
+					JANUS_LOG(LOG_INFO, "[%s-%p]Add AUDIO media  Session: %p \n", JANUS_VIDEOROOM_PACKAGE, msg->handle,session);
+                                        if (!strcmp(participant->user_id_str,participant->room_id_str)) {
+                                                JANUS_LOG(LOG_INFO, "sdp_update: Set Publisher INGRESS \n");
+                                                participant->is_ingress = TRUE;
+                                        }
+                                        else {
+                                                JANUS_LOG(LOG_INFO, "sdp_update: Set Publisher EGRESS \n");
+                                                participant->is_ingress = FALSE;
+                                        }
                                         forward_media(session, PUBLISHER_MEDIA_AUDIO);
 
 					JANUS_LOG(LOG_WARN, "--------------------------------------------\n");
