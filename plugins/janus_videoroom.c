@@ -1449,7 +1449,8 @@ typedef enum  publisher_media_type {
 } publisher_media_type;
 
 typedef enum  forward_media_type {
-	MEDIA_AUDIO_INGRESS = 0,
+	MEDIA_NOT_INITIALIZED = 0,
+	MEDIA_AUDIO_INGRESS,
 	MEDIA_AUDIO_EGRESS,
 	MEDIA_VIDEO,
 	MEDIA_AUDIO_MIXER,
@@ -1784,14 +1785,14 @@ static void janus_videoroom_recorder_close(janus_videoroom_publisher *participan
  * @param[in] media_type, enumerator of desired media type pipeline
  * @param[in] room,  the videoroom plugin room object
  * @returns TRUE  in case of success, FALSE otherwise */
-gboolean wait_for_pipeline_close(forward_media_type media_type,
+static gboolean wait_for_pipeline_close(forward_media_type media_type,
                                    janus_videoroom*  room );
 /*! \brief Method for test is pipeline processing (creation,running,...) already started , for prevent multiple start
  * @param[in] media_type, enumerator of desired media type pipeline
  * @param[in] room,  the videoroom plugin room object
- * @returns TRUE  in case of pipeline started, FALSE otherwise */
-gboolean is_pipeline_processing_started(forward_media_type media_type,
-                                        janus_videoroom*  room);
+ * @returns TRUE  in case of success of  start pipeline, FALSE otherwise */
+static gboolean start_pipeline_processing_flag(forward_media_type media_type,
+                                               janus_videoroom*  room);
 /*! \brief Method to create gstreamer pipeline  for any kind of media
  * @param[in] media_type, enumerator of desired media type pipeline
  * @param[in] room,  the videoroom plugin room object
@@ -2214,7 +2215,9 @@ static void  initialise_gst_forward_data(janus_videoroom *videoroom) {
 		videoroom->gst_thread_parameters[media_type_counter].gstr.m_watchID = 0;
 		g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gstr.gst_started_flag, 0);
 		g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gstr.gst_defined_flag, 0);
-		g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gst_run_flag,0);
+		g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].gst_run_flag, 0);
+		memset(videoroom->gst_thread_parameters[media_type_counter].logstr,'\0', MAX_STRING_LEN);
+		videoroom->gst_thread_parameters[media_type_counter].media_type = MEDIA_NOT_INITIALIZED;
 		videoroom->gst_thread_parameters[media_type_counter].forward_port_1 = 0;
 		videoroom->gst_thread_parameters[media_type_counter].forward_port_2 = 0;
 		g_atomic_int_set(&videoroom->gst_thread_parameters[media_type_counter].first_frame_flag_processed,0);
@@ -5073,21 +5076,21 @@ gboolean wait_for_pipeline_close(forward_media_type media_type,
 	return TRUE;
 }
 
-gboolean is_pipeline_processing_started(forward_media_type media_type,
+static gboolean start_pipeline_processing_flag(forward_media_type media_type,
                                         janus_videoroom*  room) {
 	if(NULL == room) {
 		JANUS_LOG(LOG_ERR, "parameter room is empty\n");
-		return TRUE;
+		return FALSE;
 	}
 
 	if(g_atomic_int_get(&room->gst_thread_parameters[media_type].gstr.gst_started_flag)) {
 		JANUS_LOG(LOG_ERR, "CARBYNE::::  pipeline already running  room:%s port:%d\n",
 		room->room_id_str,
 		room->gst_thread_parameters[media_type].forward_port_1);
-		return TRUE;
+		return FALSE;
 	}
         g_atomic_int_set(&room->gst_thread_parameters[media_type].gstr.gst_started_flag, 1);
-	return FALSE;
+	return TRUE;
 }
 
 gboolean forward_media(janus_videoroom_session *session, publisher_media_type  media_type) {
@@ -5107,7 +5110,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
         if (participant->room) {
                 janus_mutex_lock(&participant->room->mutex);
                 if(PUBLISHER_MEDIA_VIDEO == media_type ) {
-                	if(is_pipeline_processing_started(MEDIA_VIDEO, participant->room)) {
+                	if(!start_pipeline_processing_flag(MEDIA_VIDEO, participant->room)) {
                         	janus_mutex_unlock(&participant->room->mutex);
                         	return FALSE;
                 	}
@@ -5154,7 +5157,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 }
 
                 if(PUBLISHER_MEDIA_AUDIO == media_type) {
-			if(is_pipeline_processing_started(AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress), participant->room)) {
+			if(!start_pipeline_processing_flag(AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress), participant->room)) {
                                	janus_mutex_unlock(&participant->room->mutex);
                                	return FALSE;
                        	}
@@ -5187,7 +5190,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                                         participant->room_id_str,
                                         participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
                                         participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
-
+				//set  gst_started_flag here,  becouse of mixer pipeline will test it before run loop
 				g_atomic_int_set(&participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].gstr.gst_started_flag, 1);
 
                        		if(!janus_gst_create_pipeline(MEDIA_AUDIO_MIXER,
