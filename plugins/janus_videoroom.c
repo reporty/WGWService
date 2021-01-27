@@ -5089,7 +5089,7 @@ static gboolean start_pipeline_processing_flag(forward_media_type media_type,
 		room->gst_thread_parameters[media_type].forward_port_1);
 		return FALSE;
 	}
-        g_atomic_int_set(&room->gst_thread_parameters[media_type].gstr.gst_started_flag, 1);
+	g_atomic_int_set(&room->gst_thread_parameters[media_type].gstr.gst_started_flag, 1);
 	return TRUE;
 }
 
@@ -5190,7 +5190,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                                         participant->room_id_str,
                                         participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1,
                                         participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
-				//set  gst_started_flag here,  becouse of mixer pipeline will test it before run loop
+				//set  gst_started_flag here, because of mixer pipeline will test it before run loop
 				g_atomic_int_set(&participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].gstr.gst_started_flag, 1);
 
                        		if(!janus_gst_create_pipeline(MEDIA_AUDIO_MIXER,
