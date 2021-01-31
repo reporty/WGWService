@@ -1856,7 +1856,6 @@ static void janus_videoroom_publisher_free(const janus_refcount *p_ref) {
 	janus_recorder_destroy(p->arc);
 	janus_recorder_destroy(p->vrc);
 	janus_recorder_destroy(p->drc);
-JANUS_LOG(LOG_ERR, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
 	if(p->udp_sock > 0)
 		close(p->udp_sock);
 	g_hash_table_destroy(p->rtp_forwarders);
@@ -5099,6 +5098,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 if(participant->udp_sock <= 0 ||
                         setsockopt(participant->udp_sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0) {
                         JANUS_LOG(LOG_ERR, "Could not open UDP socket for RTP stream for publisher (%"SCNu64")\n",participant->user_id);
+			janus_refcount_decrease(&participant->ref);
                         return FALSE;
                 }
         }
@@ -5109,6 +5109,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 if(PUBLISHER_MEDIA_VIDEO == media_type ) {
                 	if(is_pipeline_processing_started(MEDIA_VIDEO, participant->room)) {
                         	janus_mutex_unlock(&participant->room->mutex);
+				janus_refcount_decrease(&participant->ref);
                         	return FALSE;
                 	}
 
@@ -5137,6 +5138,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                                         JANUS_LOG(LOG_ERR, "CARBYNE:::: Invalid gstreamer VIDEO pipeline.. room:%s port:%d\n",
                                         participant->room_id_str,participant->room->gst_thread_parameters[MEDIA_VIDEO].forward_port_1);
                                         janus_mutex_unlock(&participant->room->mutex);
+					janus_refcount_decrease(&participant->ref);
                                         return FALSE;
                          }
 			//create Forwarder
@@ -5156,6 +5158,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
                 if(PUBLISHER_MEDIA_AUDIO == media_type) {
 			if(is_pipeline_processing_started(AUDIO_FORWARD_MEDIA_TYPE_FROM_BOOL(participant->is_ingress), participant->room)) {
                                	janus_mutex_unlock(&participant->room->mutex);
+				janus_refcount_decrease(&participant->ref);
                                	return FALSE;
                        	}
 
@@ -5201,6 +5204,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 						participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_1 ,
 		 				participant->room->gst_thread_parameters[MEDIA_AUDIO_MIXER].forward_port_2);
                       				janus_mutex_unlock(&participant->room->mutex);
+						janus_refcount_decrease(&participant->ref);
                                  	return FALSE;
                         	}
 
@@ -5236,6 +5240,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 								NULL)) {
                                 	JANUS_LOG(LOG_ERR, "CARBYNE:::: Invalid gstreamer AUDIO pipeline.. room:%s \n", participant->room_id_str);
                                 	janus_mutex_unlock(&participant->room->mutex);
+					janus_refcount_decrease(&participant->ref);
                                 	return FALSE;
                         	}
 
@@ -5284,6 +5289,7 @@ gboolean forward_media(janus_videoroom_session *session, publisher_media_type  m
 	}
 
 	janus_videoroom_reqpli(participant, "New rtp_forward  engaged");
+	janus_refcount_decrease(&participant->ref);
 	return TRUE;
 }
 
@@ -6159,6 +6165,7 @@ static void launch_gst_video_thread(void *data) {
     if(room  == NULL) {
         JANUS_LOG(LOG_ERR, "invalid room!\n");
         g_thread_unref (g_thread_self());
+	janus_refcount_decrease(&publisher->ref);
         return;
     }
 
@@ -6177,10 +6184,10 @@ static void launch_gst_video_thread(void *data) {
        if(error != NULL) {
                JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the %s  thread...\n",
                        error->code, error->message ? error->message : "??", "VIDEO");
-               return;
        }
        g_clear_error(&error);
    }
+   janus_refcount_decrease(&publisher->ref);
 }
 
 static void  launch_gst_audio_thread (void *data) {
@@ -6203,6 +6210,7 @@ static void  launch_gst_audio_thread (void *data) {
     if(room  == NULL) {
         JANUS_LOG(LOG_ERR, "invalid room in the publisher\n");
         g_thread_unref (g_thread_self());
+	janus_refcount_decrease(&publisher->ref);
         return;
     }
 
@@ -6232,10 +6240,10 @@ static void  launch_gst_audio_thread (void *data) {
        if(error != NULL) {
            JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the gstreamer AUDIO  thread...\n",
                       error->code, error->message ? error->message : "??");
-           return ;
        }
        g_clear_error(&error);
    }
+   janus_refcount_decrease(&publisher->ref);
 }
 
 static void  launch_gst_audiomixer_thread (void *data) {
@@ -6259,7 +6267,6 @@ static void  launch_gst_audiomixer_thread (void *data) {
 		if(error != NULL) {
 			JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the gstreamer AUDIO MIXER thread...\n",
 			error->code, error->message ? error->message : "??");
-			return ;
 		}
 		g_clear_error(&error);
 	}
