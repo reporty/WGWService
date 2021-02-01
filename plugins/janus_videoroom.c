@@ -6171,6 +6171,7 @@ static void  launch_gst_thread(forward_media_type media_type, janus_videoroom* r
 	JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ----logstr:%s\n",room->gst_thread_parameters[media_type].logstr);
 
 	char thread_name[MAX_STRING_LEN];
+	memset(thread_name,'\0',MAX_STRING_LEN);
 	IS_PARAM_IN_LIMITS_RETURN_VOID(g_snprintf(thread_name, MAX_STRING_LEN, "gst%s",
 					FORWARD_MEDIA_TYPE_TO_STRING(media_type)), "thread_name", 0, MAX_STRING_LEN);
 	JANUS_LOG(LOG_INFO, "---------------BEFORE START GST THREAD ---thread_name:%s\n", thread_name);
