@@ -1343,6 +1343,7 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
        /* CARBYNE-SHC start */
 	if(session_path != NULL && !strcmp(session_path, "SanityHealthCheck"))
         {
+               JANUS_LOG(LOG_VERB, " SanityHealthCheck processing IN\n");
                /* The info REST endpoint, if contacted through a GET, provides information on the Janus core */
                gboolean token_not_valid = TRUE;
                gboolean no_resources = TRUE;
@@ -1352,11 +1353,11 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
                       janus_http_add_cors_headers(msg, response);
                       ret = MHD_queue_response(connection, MHD_HTTP_BAD_REQUEST, response); //400
                       MHD_destroy_response(response);
+                      JANUS_LOG(LOG_VERB, " SanityHealthCheck processing OUT, MHD_HTTP_BAD_REQUEST\n");
                       goto done;
                }
 
                const char *token = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "credentials");
-               JANUS_LOG(LOG_VERB, " SanityHealthCheck credentials= %s\n", token);
 
 		if(!gateway->carbyne_is_sanityhealthcheck_token_valid(&janus_http_transport, token))
                 {
@@ -1364,6 +1365,7 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
                         janus_http_add_cors_headers(msg, response);
                         ret = MHD_queue_response(connection, MHD_HTTP_UNAUTHORIZED, response); //401
                         MHD_destroy_response(response);
+                        JANUS_LOG(LOG_VERB, " SanityHealthCheck processing OUT, MHD_HTTP_UNAUTHORIZED\n");
                         goto done;
 		}
 		if(!gateway->carbyne_is_sanityhealthcheck_resources_available(&janus_http_transport))
@@ -1372,6 +1374,7 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
                       janus_http_add_cors_headers(msg, response);
                       ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response); //500
                       MHD_destroy_response(response);
+                      JANUS_LOG(LOG_VERB, " SanityHealthCheck processing OUT, MHD_HTTP_INTERNAL_SERVER_ERROR\n");
                       goto done;
 		}
 
@@ -1379,6 +1382,7 @@ static int janus_http_handler(void *cls, struct MHD_Connection *connection,
                 janus_http_add_cors_headers(msg, response);
                 ret = MHD_queue_response(connection, MHD_HTTP_OK, response); //200
                 MHD_destroy_response(response);
+                JANUS_LOG(LOG_VERB, " SanityHealthCheck processing OUT, MHD_HTTP_OK\n");
                 goto done;
         }
         /* CARBYNE-SHC end */
